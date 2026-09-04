@@ -11,6 +11,7 @@ final class RTSPServer {
     var onAnnounceReceived: ((String) -> Void)?
     var onMetadataReceived: ((Data) -> Void)?
     var onAudioDataReceived: ((Data) -> Void)?
+    var onPlaybackCommandReceived: ((String) -> Void)?
 
     func stop() {
         tcpListener?.cancel()
@@ -183,7 +184,17 @@ final class RTSPServer {
                 onMetadataReceived?(rawData[bodyStart.upperBound...])
             }
             sendOKResponse(cSeq: cSeq, on: connection)
-        case "RECORD", "TEARDOWN", "FLUSH":
+        case "PLAY":
+            onPlaybackCommandReceived?(method)
+            sendOKResponse(cSeq: cSeq, on: connection)
+        case "PAUSE":
+            onPlaybackCommandReceived?(method)
+            sendOKResponse(cSeq: cSeq, on: connection)
+        case "RECORD", "TEARDOWN":
+            onPlaybackCommandReceived?(method)
+            sendOKResponse(cSeq: cSeq, on: connection)
+        case "FLUSH":
+            onPlaybackCommandReceived?(method)
             sendOKResponse(cSeq: cSeq, on: connection)
         default:
             sendOKResponse(cSeq: cSeq, on: connection)

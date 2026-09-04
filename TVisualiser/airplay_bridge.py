@@ -140,12 +140,23 @@ class AirPlayBridge:
         self.sequence = 0
         self.timestamp = 0
         self.server_audio_port = None
+        self.session_id = None
+        self.cseq = 0
+
+    def next_cseq(self):
+        self.cseq += 1
+        return self.cseq
 
     def receive_response(self):
         """Read one complete RTSP response, including an optional body."""
         response = b""
         while b"\r\n\r\n" not in response:
-            response += self.rtsp_sock.recv(4096)
+            chunk = self.rtsp_sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        if not response:
+            raise RuntimeError("RTSP receiver closed the connection")
         header, body = response.split(b"\r\n\r\n", 1)
         lines = header.decode("utf-8", errors="replace").split("\r\n")
         content_length = 0
@@ -153,22 +164,32 @@ class AirPlayBridge:
             if line.lower().startswith("content-length:"):
                 content_length = int(line.split(":", 1)[1].strip())
         while len(body) < content_length:
-            body += self.rtsp_sock.recv(4096)
+            chunk = self.rtsp_sock.recv(4096)
+            if not chunk:
+                break
+            body += chunk
+        for line in lines:
+            if line.lower().startswith("session:"):
+                self.session_id = line.split(":", 1)[1].strip().split(";", 1)[0]
         if not lines[0].startswith("RTSP/1.0 200"):
             raise RuntimeError(f"RAOP receiver rejected request: {lines[0]}")
         return lines, body
 
     def start_session(self, metadata):
-        """Executes full RTSP handshake."""
+        """Executes a classic RAOP RTSP initialization flow that closely matches real Apple sender behavior."""
         self.rtsp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.rtsp_sock.settimeout(5)
         self.rtsp_sock.connect((TARGET_IP, RTSP_PORT))
         print(f"[*] RAOP RTSP connected ({TARGET_IP}:{RTSP_PORT})")
 
         # 1. OPTIONS
-        self.rtsp_sock.sendall(b"OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: AirPlay/320.20\r\n\r\n")
+        options_cseq = self.next_cseq()
+        self.rtsp_sock.sendall(
+            f"OPTIONS * RTSP/1.0\r\nCSeq: {options_cseq}\r\nUser-Agent: AirPlay/320.20\r\n\r\n".encode()
+        )
         self.receive_response()
 
-        # 2. ANNOUNCE
+        # 2. ANNOUNCE with classic RAOP SDP fields
         sdp = (
             "v=0\r\n"
             "o=iTunes 1 0 IN IP4 127.0.0.1\r\n"
@@ -179,16 +200,23 @@ class AirPlayBridge:
             "a=rtpmap:96 L16/44100/2\r\n"
             "a=min-latency:11025\r\n"
         ).encode()
-        announce = b"ANNOUNCE rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 2\r\nContent-Type: application/sdp\r\n"
-        announce += f"Content-Length: {len(sdp)}\r\n\r\n".encode() + sdp
+        announce_cseq = self.next_cseq()
+        announce = (
+            f"ANNOUNCE rtsp://127.0.0.1/stream RTSP/1.0\r\n"
+            f"CSeq: {announce_cseq}\r\n"
+            "Content-Type: application/sdp\r\n"
+            f"Content-Length: {len(sdp)}\r\n\r\n".encode() + sdp
+        )
         self.rtsp_sock.sendall(announce)
         self.receive_response()
 
-        # 3. SETUP
+        # 3. SETUP: keep the transport closer to a real sender than the bare minimum.
+        setup_cseq = self.next_cseq()
         setup_req = (
-            "SETUP rtsp://127.0.0.1/stream RTSP/1.0\r\n"
-            "CSeq: 3\r\n"
-            "Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=6001;timing_port=6002\r\n\r\n"
+            f"SETUP rtsp://127.0.0.1/stream RTSP/1.0\r\n"
+            f"CSeq: {setup_cseq}\r\n"
+            "Transport: RTP/AVP/UDP;unicast;mode=record;interleaved=0-1;control_port=6001;timing_port=6002\r\n"
+            "User-Agent: AirPlay/320.20\r\n\r\n"
         )
         self.rtsp_sock.sendall(setup_req.encode())
         setup_lines, _ = self.receive_response()
@@ -198,32 +226,71 @@ class AirPlayBridge:
         if not self.server_audio_port:
             raise RuntimeError("RAOP receiver did not return server_port")
 
-        # 4. SET_PARAMETER (Initial Metadata)
+        # 4. Initial metadata and state update, then record mode.
         self.send_metadata(metadata)
+        self.send_keepalive(body=b"volume: 0.0\r\n")
 
-        # 5. RECORD
-        self.rtsp_sock.sendall(b"RECORD rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0-\r\n\r\n")
+        record_cseq = self.next_cseq()
+        record_request = (
+            f"RECORD rtsp://127.0.0.1/stream RTSP/1.0\r\n"
+            f"CSeq: {record_cseq}\r\n"
+            f"Session: {self.session_id or '0'}\r\n"
+            "Range: npt=0-\r\n\r\n"
+        )
+        self.rtsp_sock.sendall(record_request.encode())
+        self.receive_response()
+
+    def send_keepalive(self, body: bytes):
+        if not self.session_id:
+            return
+        cseq = self.next_cseq()
+        header = (
+            "SET_PARAMETER rtsp://127.0.0.1/stream RTSP/1.0\r\n"
+            f"CSeq: {cseq}\r\n"
+            f"Session: {self.session_id}\r\n"
+            "Content-Type: text/parameters\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        )
+        self.rtsp_sock.sendall(header.encode() + body)
+        self.receive_response()
+
+    def send_playback_command(self, method: str):
+        if not self.session_id:
+            return
+        cseq = self.next_cseq()
+        command = (
+            f"{method} rtsp://127.0.0.1/stream RTSP/1.0\r\n"
+            f"CSeq: {cseq}\r\n"
+            f"Session: {self.session_id}\r\n"
+            "Range: npt=0-\r\n\r\n"
+        )
+        self.rtsp_sock.sendall(command.encode())
         self.receive_response()
 
     def send_metadata(self, metadata):
-        """Sends track title, artist, album, artwork, and runtime metadata without dropping audio stream."""
+        """Sends track title, artist, album, duration, and artwork using DAAP-style metadata."""
         artwork = extract_artwork_bytes(metadata)
         duration_ms = int(metadata.get("duration_ms", 210000))
 
-        daap_payload = pack_daap_tag('minm', metadata["title"]) + \
-                       pack_daap_tag('asar', metadata["artist"]) + \
-                       pack_daap_tag('asal', metadata["album"]) + \
-                       pack_daap_tag('mper', struct.pack('>I', duration_ms))
+        daap_payload = (
+            pack_daap_tag('minm', metadata["title"]) +
+            pack_daap_tag('asar', metadata["artist"]) +
+            pack_daap_tag('asal', metadata["album"]) +
+            pack_daap_tag('mper', struct.pack('>I', duration_ms))
+        )
 
         if artwork:
             daap_payload += pack_daap_tag('covr', artwork)
             print(f"[*] Artwork attached ({len(artwork)} bytes)")
 
+        cseq = self.next_cseq()
+        session_line = f"Session: {self.session_id}\r\n" if self.session_id else ""
         header = (
             "SET_PARAMETER rtsp://127.0.0.1/stream RTSP/1.0\r\n"
-            "CSeq: 4\r\n"
-            "Content-Type: application/x-dmap-tagged\r\n"
-            f"Content-Length: {len(daap_payload)}\r\n\r\n"
+            f"CSeq: {cseq}\r\n"
+            + session_line
+            + "Content-Type: application/x-dmap-tagged\r\n"
+            + f"Content-Length: {len(daap_payload)}\r\n\r\n"
         )
         self.rtsp_sock.sendall(header.encode() + daap_payload)
         self.receive_response()
@@ -250,7 +317,8 @@ def run_auto_bridge():
             "title": "AirPlay Test Tone",
             "artist": "TVisualiser",
             "album": "Classic RAOP",
-            "source": "simulated"
+            "source": "simulated",
+            "duration_ms": 210000
         }
         print("[*] No system media detected. Falling back to synthetic test tone.")
     else:
@@ -271,6 +339,7 @@ def run_auto_bridge():
         process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     last_check_time = time.time()
+    transport_toggle = 0
 
     try:
         while True:
@@ -284,7 +353,7 @@ def run_auto_bridge():
             sample_count = len(pcm_chunk) // 2
             samples = struct.unpack(f"<{sample_count}h", pcm_chunk[:sample_count * 2])
             payload = struct.pack(f">{sample_count}h", *samples)
-            header = struct.pack(">BBHII", 0x80, 96, bridge.sequence, bridge.timestamp, 0x12345678)
+            header = struct.pack(">BBHII", 0x80, 0xE0, bridge.sequence, bridge.timestamp, 0x12345678)
             udp_sock.sendto(header + payload, (TARGET_IP, bridge.server_audio_port))
             bridge.sequence = (bridge.sequence + 1) & 0xffff
             bridge.timestamp = (bridge.timestamp + len(samples) // 2) & 0xffffffff
@@ -296,6 +365,12 @@ def run_auto_bridge():
                     print(f"[*] Song change detected!")
                     bridge.current_track = now_playing["title"]
                     bridge.send_metadata(now_playing)
+                elif not now_playing:
+                    transport_toggle += 1
+                    if transport_toggle % 2 == 0:
+                        bridge.send_playback_command("PAUSE")
+                    else:
+                        bridge.send_playback_command("PLAY")
 
     except KeyboardInterrupt:
         print("\n[*] Bridge stopped.")
