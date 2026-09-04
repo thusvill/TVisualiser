@@ -256,9 +256,7 @@
 				DEVELOPMENT_TEAM = 44DJWYP5M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = (
-					"_raop._tcp",
-				);
+				INFOPLIST_KEY_NSBonjourServices = _raop._tcp;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TVisualiser receives AirPlay audio from devices on your local network.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
@@ -276,6 +274,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 15.1.1;
 			};
 			name = Debug;
 		};
@@ -289,9 +288,7 @@
 				DEVELOPMENT_TEAM = 44DJWYP5M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = (
-					"_raop._tcp",
-				);
+				INFOPLIST_KEY_NSBonjourServices = _raop._tcp;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TVisualiser receives AirPlay audio from devices on your local network.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
@@ -309,6 +306,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 15.1.1;
 			};
 			name = Release;
 		};

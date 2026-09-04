@@ -25,11 +25,10 @@ Build a standalone tvOS audio visualizer that advertises as an AirPlay 1 / RAOP 
 
 ### Visualizer UI
 
-- `ContentView.swift` now contains a full-screen dark tvOS visualizer.
-- Displays `T/VISUALISER` branding, AirPlay receiver status, track title, artist, album, and level percentage.
-- Draws 96 waveform bars with SwiftUI `Canvas`.
-- Supports a blurred artwork background when `ReceiverStore.artwork` is populated.
-- Uses coral and lime accents rather than the default template styling.
+- `ContentView.swift` now contains a full-screen album-focused tvOS visualizer based on the supplied reference image.
+- Displays a live clock/date header, centered artwork, blurred artwork ambience, a thin line waveform, and a bordered now-playing panel.
+- Shows a deterministic fallback cover while no artwork metadata has arrived.
+- Keeps live AirPlay/ready status in the player panel.
 
 ### Receiver state
 
@@ -48,6 +47,11 @@ Build a standalone tvOS audio visualizer that advertises as an AirPlay 1 / RAOP 
 - The RAOP TXT record includes standard codec and encryption capability flags expected by AirPlay audio senders.
 - `DebugSettings.swift` provides one global switch, `DebugSettings.enabled = true`; set it to `false` to silence TVisualiser diagnostics.
 - Debug output now covers Bonjour publish failures, listener states, TCP connections, RTSP requests/responses, receive/send errors, RTP packet sizes, ANNOUNCE events, and analyzer payload sizes.
+- `SET_PARAMETER` now forwards its binary body and parses DAAP tags: `minm` updates title, `asar` updates artist, and `asal` updates album.
+- `ReceiverStore` now interprets the bridge's UDP stream as raw 44.1 kHz stereo signed 16-bit PCM, schedules it through `AVAudioEngine`, and derives the waveform from decoded samples.
+- `covr` DMAP artwork is decoded into the UI image; the player surface uses rounded artwork/material styling and includes a settings sheet.
+- `airplay_bridge.py` now behaves as a classic RAOP sender: it sends a non-empty SDP `ANNOUNCE`, reads complete RTSP responses, uses the negotiated `server_port`, and transmits RTP payload type 96 L16 audio with sequence numbers and timestamps.
+- `RTSPServer` now buffers fragmented/coalesced RTSP messages and honors `Content-Length`, allowing binary metadata bodies and SDP bodies to reach their callbacks safely.
 
 ## Validation
 
@@ -60,6 +64,10 @@ xcodebuild -project ../TVisualiser.xcodeproj -scheme TVisualiser -sdk appletvsim
 Pylance/Swift diagnostics checked on the touched Swift files: no errors reported.
 
 The target still builds successfully after the local-network and advertisement changes.
+
+The Python `test.py` handshake was verified from the attached output through `OPTIONS`, `ANNOUNCE`, `SETUP`, `SET_PARAMETER`, and `RECORD`. Its DMAP metadata should now update the UI to `Blinding Lights`, `The Weeknd`, and `After Hours`. That script sends no RTP audio packets, so it cannot animate the waveform or produce playback; add UDP RTP fixture packets separately for that test.
+
+`airplay_bridge.py` does send raw PCM over UDP port 6000. The Swift receiver now consumes that exact format for playback. The bridge's FFmpeg input (`avfoundation`, device `:0`) must provide the intended audio source; on macOS this is commonly a microphone/input device, not system Music audio, unless a loopback device is configured.
 
 ## Known Gaps
 
@@ -83,6 +91,8 @@ The attached diagnostic output shows an `appletvsimulator` run. The simulator ca
 With debugging enabled, the expected connection sequence is an accepted TCP connection followed by `OPTIONS`, `ANNOUNCE`, `SETUP`, and `RECORD`. If no accepted connection appears, investigate Bonjour/network permissions or stale service records. If the sequence stops at a request, implement the corresponding RAOP response/state handling before changing the UI.
 
 The current UDP waveform path treats packet bytes as an analyzer fallback. It must not be described as decoded audio playback until the RTP/ALAC pipeline is implemented.
+
+The Python sender now exercises the unencrypted classic RAOP/L16 path. iPhone Music/AirPlay commonly selects encrypted ALAC and requires the RSA/FairPlay session path, which is still not implemented in this app.
 
 ## Recommended Next Plan
 

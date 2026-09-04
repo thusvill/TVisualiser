@@ -6,7 +6,7 @@ struct TVisualiserApp: App {
     private let advertiser = AirPlayAdvertiser()
     
     init() {
-        DebugSettings.enabled = true
+        //DebugSettings.enabled = true
         let receiver = ReceiverStore()
         _receiver = StateObject(wrappedValue: receiver)
         advertiser.startAdvertising()
