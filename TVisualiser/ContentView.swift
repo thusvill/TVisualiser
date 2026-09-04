@@ -6,366 +6,1472 @@
 //
 
 import SwiftUI
+import UIKit
+
+// ================================================================
+// MARK: - ContentView
+// ================================================================
 
 struct ContentView: View {
+
     @EnvironmentObject private var receiver: ReceiverStore
+
+    // ------------------------------------------------------------
+    // Settings
+    // ------------------------------------------------------------
+
+    @AppStorage("showClock")
+    private var showClock: Bool = true
+
+    @AppStorage("autoOpenOnAirPlay")
+    private var autoOpenOnAirPlay: Bool = false
+
+    @AppStorage("dynamicWaveformColor")
+    private var dynamicWaveformColor: Bool = true
+
+    @AppStorage("waveformLineWidth")
+    private var waveformLineWidth: Double = 2.0
+
+    @AppStorage("waveformSensitivity")
+    private var waveformSensitivity: Double = 1.0
+
+    // ------------------------------------------------------------
+    // State
+    // ------------------------------------------------------------
+
     @State private var showingSettings = false
 
-    @AppStorage("showClock") private var showClock: Bool = true
-    @AppStorage("autoOpenOnAirPlay") private var autoOpenOnAirPlay: Bool = false
-    @AppStorage("dynamicWaveformColor") private var dynamicWaveformColor: Bool = true
-    @AppStorage("waveformLineWidth") private var waveformLineWidth: Double = 2.0
-    @AppStorage("waveformSensitivity") private var waveformSensitivity: Double = 1.0
+    // ============================================================
+    // MARK: Body
+    // ============================================================
 
     var body: some View {
-        GeometryReader { geo in
-            let isCompact = geo.size.width < 500
-            let artSide: CGFloat = min(geo.size.width - 120, isCompact ? 220 : 340)
+
+        GeometryReader { geometry in
+
+            let width = geometry.size.width
+            let height = geometry.size.height
+
+            /*
+             The artwork is sized independently from the bottom
+             player card.
+
+             This is important:
+
+             The player card does NOT participate in the vertical
+             layout of the artwork section.
+
+             Therefore the player controls can never be pushed
+             outside the screen by the waveform or artwork.
+             */
+
+            let artworkSize = min(
+                width * 0.27,
+                height * 0.40,
+                350
+            )
 
             ZStack {
-                // Layer 1: base background
+
+                // ==================================================
+                // BACKGROUND
+                // ==================================================
+
                 background
-                    .ignoresSafeArea()
 
-                // Layer 2: blurred cover art background
-                backgroundArt
-                    .ignoresSafeArea()
+                // ==================================================
+                // CENTER CONTENT
+                // ==================================================
 
-                // Layer 3: media controls — its own layer, above the
-                // blurred background but below the main content layer
-                mediaControls
-                    .frame(maxWidth: 420)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 240)
-
-                // Layer 4: main foreground content
                 VStack(spacing: 0) {
-                    Spacer(minLength: 90)
 
-                    albumArt(side: artSide)
-                        .padding(.bottom, 30)
+                    Spacer(
+                        minLength: 115
+                    )
 
-                     waveform
-                         .frame(height: 60)
+                    // ------------------------------------------------
+                    // ALBUM ART
+                    // ------------------------------------------------
 
-                    // Spacer(minLength: 30)
+                    AlbumArtView(
+                        artwork: receiver.artwork,
+                        side: artworkSize
+                    )
 
-                    playerPanel
-                        .frame(maxWidth: 650)
+                    // ------------------------------------------------
+                    // METADATA
+                    // ------------------------------------------------
 
-                    Spacer(minLength: 60)
+                    Spacer(
+                        minLength: 22
+                    )
+
+                    MetadataView(
+                        title: receiver.trackTitle,
+                        artist: receiver.artist,
+                        album: receiver.album
+                    )
+                    .frame(
+                        maxWidth: 720
+                    )
+
+                    // ------------------------------------------------
+                    // WAVEFORM
+                    // ------------------------------------------------
+
+                    Spacer(
+                        minLength: 20
+                    )
+
+                    AudioVisualizerView(
+                        data: receiver.waveform,
+                        color: dynamicWaveformColor
+                            ? receiver.waveformColor
+                            : .black,
+                        sensitivity: waveformSensitivity,
+                        lineWidth: waveformLineWidth
+                    )
+                    .frame(
+                        width: min(
+                            width * 0.78,
+                            1100
+                        ),
+                        height: 90
+                    )
+
+                    Spacer()
                 }
-            }
-            .overlay(alignment: .topLeading) {
-                settingsHint
-                    .padding(.top, 28)
-                    .padding(.leading, 40)
-            }
-            .overlay(alignment: .topTrailing) {
-                if showClock {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        clockView(date: context.date)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
+                )
+
+                // ==================================================
+                // BOTTOM MEDIA CONTROL BAR
+                //
+                // This is anchored to the bottom of the ZStack.
+                // It does NOT affect the vertical placement of the
+                // artwork, metadata or waveform.
+                // ==================================================
+
+                VStack {
+
+                    Spacer()
+
+                    MediaControlCard(
+                        currentTime: receiver.currentTime,
+                        duration: receiver.duration,
+                        isPlaying: receiver.isPlaying,
+                        onBackward: {
+                            receiver.skipBackward()
+                        },
+                        onPlayPause: {
+                            receiver.togglePlayback()
+                        },
+                        onForward: {
+                            receiver.skipForward()
+                        }
+                    )
+                    .frame(
+                        width: min(
+                            width * 0.50,
+                            760
+                        )
+                    )
+                    .padding(
+                        .bottom,
+                        34
+                    )
+                }
+
+                // ==================================================
+                // HEADER
+                // ==================================================
+
+                HeaderView(
+                    showClock: showClock,
+                    onSettings: {
+                        showingSettings = true
                     }
-                    .padding(.top, 26)
-                    .padding(.trailing, 40)
-                }
+                )
             }
         }
         .preferredColorScheme(.light)
-        .focusable(true)
+
+        // Required for tvOS remote interaction.
+        .focusable()
+
+        // Remote Play/Pause button.
         .onPlayPauseCommand {
             receiver.togglePlayback()
         }
-        .onMoveCommand { direction in
-            switch direction {
-            case .up:
-                showingSettings = true
-            case .left:
-                receiver.skipBackward()
-            case .right:
-                receiver.skipForward()
-            default:
-                break
-            }
+
+        .onChange(
+            of: receiver.isReceiving
+        ) { newValue in
+
+            handleReceivingStateChange(
+                newValue
+            )
         }
-        .onChange(of: receiver.isReceiving) { nowReceiving in
-            if nowReceiving && autoOpenOnAirPlay && showingSettings {
-                showingSettings = false
-            }
-        }
-        .sheet(isPresented: $showingSettings) {
+
+        .sheet(
+            isPresented: $showingSettings
+        ) {
             SettingsView()
         }
     }
+}
 
-    private var background: some View {
-        Color(white: 0.94)
-    }
+// ================================================================
+// MARK: - Background
+// ================================================================
 
-    private var backgroundArt: some View {
-        Group {
+private extension ContentView {
+
+    var background: some View {
+
+        ZStack {
+
+            // ------------------------------------------------------
+            // Base background
+            // ------------------------------------------------------
+
+            Color(
+                white: 0.93
+            )
+            .ignoresSafeArea()
+
+            // ------------------------------------------------------
+            // Full-screen blurred artwork
+            // ------------------------------------------------------
+
             if let artwork = receiver.artwork {
-                Image(uiImage: artwork)
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 60)
-                    .saturation(0.1)
-                    .opacity(0.34)
-                    .clipped()
-                    .overlay(Color.white.opacity(0.2))
-            } else {
-                Color.clear
-            }
-        }
-    }
 
-    // MARK: - Settings hint (gear + "press up" label)
+                Image(
+                    uiImage: artwork
+                )
+                .resizable()
+                .scaledToFill()
+                .scaleEffect(1.18)
+                .blur(
+                    radius: 75
+                )
+                .saturation(0.60)
+                .opacity(0.52)
+                .ignoresSafeArea()
 
-    private var settingsHint: some View {
-        Button {
-            showingSettings = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                Text("Press up on the remote to open settings")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-            }
-            .foregroundStyle(.black)
-        }
-        .buttonStyle(.plain)
-    }
+                // --------------------------------------------------
+                // Artwork color glow
+                // --------------------------------------------------
 
-    private func clockView(date: Date) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            Text(date, format: .dateTime.hour().minute())
-                .font(.system(size: 40, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.black)
-            Text(date, format: .dateTime.weekday(.abbreviated))
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundStyle(.black)
-        }
-    }
+                RadialGradient(
+                    colors: [
+                        receiver.waveformColor
+                            .opacity(0.30),
 
-    // MARK: - Album art
+                        receiver.waveformColor
+                            .opacity(0.10),
 
-    private func albumArt(side: CGFloat) -> some View {
-        Group {
-            if let artwork = receiver.artwork {
-                Image(uiImage: artwork)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Color(white: 0.98)
-                    Text("Cover Art")
-                        .font(.system(size: 34, weight: .medium, design: .rounded))
-                        .foregroundStyle(.black.opacity(0.55))
-                }
-            }
-        }
-        .frame(width: side, height: side)
-        .clipped()
-        .overlay(Rectangle().stroke(.black, lineWidth: 2))
-    }
-
-    // MARK: - Waveform (dynamic color, custom sensitivity/width)
-
-    private var waveform: some View {
-        Canvas { context, size in
-            let count = receiver.waveform.count
-            guard count > 1 else { return }
-            var path = Path()
-            for index in 0..<count {
-                let x = CGFloat(index) / CGFloat(max(1, count - 1)) * size.width
-                let rawLevel = CGFloat(max(0.03, receiver.waveform[index]))
-                let level = min(1.0, rawLevel * CGFloat(waveformSensitivity))
-                let y = size.height / 2 + (index.isMultiple(of: 2) ? -1 : 1) * level * size.height * 0.72
-                if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                else { path.addLine(to: CGPoint(x: x, y: y)) }
-            }
-            let color = dynamicWaveformColor ? receiver.waveformColor : .black
-            context.stroke(path, with: .color(color), lineWidth: waveformLineWidth)
-        }
-    }
-
-    // MARK: - Media controls (own z-layer, non-interactive glyphs —
-    // real control flows through onPlayPauseCommand / onMoveCommand)
-
-    private var mediaControls: some View {
-        HStack(spacing: 18) {
-            Image(systemName: "gobackward.10")
-                .font(.system(size: 26, weight: .bold))
-                .frame(width: 42, height: 42)
-                .foregroundStyle(.black)
-
-            Image(systemName: receiver.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 28, weight: .bold))
-                .frame(width: 56, height: 56)
-                .foregroundStyle(.white)
-                .background(Color.black, in: Circle())
-
-            Image(systemName: "goforward.10")
-                .font(.system(size: 26, weight: .bold))
-                .frame(width: 42, height: 42)
-                .foregroundStyle(.black)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.black.opacity(0.25), lineWidth: 1.5))
-    }
-
-    // MARK: - Player panel
-
-    private var playerPanel: some View {
-        VStack(spacing: 14) {
-            VStack(spacing: 4) {
-                Text(receiver.trackTitle)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(receiver.artist)
-                    .font(.system(size: 17, weight: .medium, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                        Color.clear
+                    ],
+                    center: .center,
+                    startRadius: 50,
+                    endRadius: 750
+                )
+                .ignoresSafeArea()
             }
 
-            HStack(spacing: 10) {
-                Text(formatTime(receiver.currentTime))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.7))
+            // ------------------------------------------------------
+            // White readability wash
+            // ------------------------------------------------------
 
-                lineProgress
-                    .frame(maxWidth: .infinity)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.78),
+                    Color.white.opacity(0.18),
+                    Color.white.opacity(0.62)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-                Text(formatTime(receiver.duration))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.7))
-            }
+            // ------------------------------------------------------
+            // Center highlight
+            // ------------------------------------------------------
+
+            RadialGradient(
+                colors: [
+                    Color.white.opacity(0.20),
+                    Color.clear
+                ],
+                center: .center,
+                startRadius: 100,
+                endRadius: 700
+            )
+            .ignoresSafeArea()
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 20)
-        .overlay(Rectangle().stroke(.black, lineWidth: 1.5))
     }
 
-    private var lineProgress: some View {
-        GeometryReader { proxy in
-            let total = max(receiver.duration, 1)
-            let fraction = CGFloat(min(receiver.currentTime, receiver.duration) / total)
-            let width = max(proxy.size.width, 1)
-            let dotX = width * fraction
+    func handleReceivingStateChange(
+        _ isReceiving: Bool
+    ) {
 
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(.black.opacity(0.45))
-                    .frame(height: 2)
+        if isReceiving &&
+            autoOpenOnAirPlay &&
+            showingSettings {
 
-                Rectangle()
-                    .fill(.black)
-                    .frame(width: max(0, width * fraction), height: 2)
-
-                Circle()
-                    .fill(.black)
-                    .frame(width: 10, height: 10)
-                    .offset(x: max(0, min(dotX - 5, width - 10)))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            showingSettings = false
         }
-        .frame(height: 16)
-    }
-
-    private func formatTime(_ seconds: TimeInterval) -> String {
-        let totalSeconds = Int(max(0, seconds.rounded()))
-        let minutes = totalSeconds / 60
-        let remainder = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, remainder)
     }
 }
 
-private struct SettingsView: View {
-    @AppStorage("showClock") private var showClock: Bool = true
-    @AppStorage("autoOpenOnAirPlay") private var autoOpenOnAirPlay: Bool = false
-    @AppStorage("dynamicWaveformColor") private var dynamicWaveformColor: Bool = true
-    @AppStorage("waveformLineWidth") private var waveformLineWidth: Double = 2.0
-    @AppStorage("waveformSensitivity") private var waveformSensitivity: Double = 1.0
+// ================================================================
+// MARK: - Header
+// ================================================================
+
+struct HeaderView: View {
+
+    let showClock: Bool
+    let onSettings: () -> Void
 
     var body: some View {
-        Form {
-            Section {
-                Text("TVisualiser")
-                    .font(.title2.bold())
-                Text("AirPlay receiver is active on port 5000.")
-                    .foregroundStyle(.secondary)
-            }
 
-            Section("Display") {
-                Toggle("Show clock", isOn: $showClock)
-            }
+        ZStack {
 
-            Section("AirPlay") {
-                Toggle("Auto-show Now Playing on connect", isOn: $autoOpenOnAirPlay)
-                Text("If Settings is open when a stream begins, it will close automatically. tvOS apps can't launch themselves from the background, so the app must already be running.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            // ======================================================
+            // Settings
+            // ======================================================
 
-            Section("Waveform") {
-                Toggle("Dynamic color from cover art", isOn: $dynamicWaveformColor)
+            VStack {
 
-                valueStepper(
-                    label: "Line width",
-                    value: $waveformLineWidth,
-                    range: 1...6,
-                    step: 0.5
-                )
+                HStack {
 
-                valueStepper(
-                    label: "Sensitivity",
-                    value: $waveformSensitivity,
-                    range: 0.5...2.0,
-                    step: 0.1
-                )
-            }
+                    Button(
+                        action: onSettings
+                    ) {
 
-            Section("Remote controls") {
-                Text("Play/Pause button — toggle playback")
-                Text("Swipe left / right — skip ±10s")
-                Text("Swipe up — open Settings")
-            }
-        }
-    }
+                        HStack(
+                            spacing: 10
+                        ) {
 
-    private func valueStepper(
-        label: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double
-    ) -> some View {
-        HStack {
-            Text("\(label): \(String(format: "%.1f", value.wrappedValue))")
-            Spacer()
-            HStack(spacing: 20) {
-                Button {
-                    value.wrappedValue = max(range.lowerBound, value.wrappedValue - step)
-                } label: {
-                    Image(systemName: "minus.circle")
+                            Image(
+                                systemName:
+                                    "gearshape.fill"
+                            )
+                            .font(
+                                .system(
+                                    size: 19,
+                                    weight: .semibold
+                                )
+                            )
+
+                            Text(
+                                "Select to open settings"
+                            )
+                            .font(
+                                .system(
+                                    size: 17,
+                                    weight: .medium,
+                                    design: .rounded
+                                )
+                            )
+                        }
+                        .foregroundStyle(
+                            .black
+                        )
+                        .padding(
+                            .horizontal,
+                            18
+                        )
+                        .padding(
+                            .vertical,
+                            11
+                        )
+                        .background(
+                            Color.white.opacity(0.82),
+                            in: Capsule()
+                        )
+                        .overlay {
+
+                            Capsule()
+                                .stroke(
+                                    Color.white.opacity(0.90),
+                                    lineWidth: 1
+                                )
+                        }
+                        .shadow(
+                            color: .black.opacity(0.12),
+                            radius: 12,
+                            x: 0,
+                            y: 5
+                        )
+                    }
+                    .buttonStyle(
+                        TVButtonStyle()
+                    )
+
+                    Spacer()
                 }
 
-                Button {
-                    value.wrappedValue = min(range.upperBound, value.wrappedValue + step)
-                } label: {
-                    Image(systemName: "plus.circle")
+                Spacer()
+            }
+            .padding(
+                .top,
+                24
+            )
+            .padding(
+                .leading,
+                30
+            )
+
+            // ======================================================
+            // Clock
+            // ======================================================
+
+            if showClock {
+
+                VStack {
+
+                    HStack {
+
+                        Spacer()
+
+                        TimelineView(
+                            .periodic(
+                                from: .now,
+                                by: 1
+                            )
+                        ) { context in
+
+                            ClockView(
+                                date: context.date
+                            )
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(
+                    .top,
+                    20
+                )
+                .padding(
+                    .trailing,
+                    32
+                )
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: .top
+        )
+    }
+}
+
+// ================================================================
+// MARK: - Button Style
+// ================================================================
+
+struct TVButtonStyle: ButtonStyle {
+
+    func makeBody(
+        configuration: Configuration
+    ) -> some View {
+
+        configuration.label
+            .scaleEffect(
+                configuration.isPressed
+                    ? 0.94
+                    : 1.0
+            )
+            .opacity(
+                configuration.isPressed
+                    ? 0.75
+                    : 1.0
+            )
+            .animation(
+                .easeOut(
+                    duration: 0.10
+                ),
+                value: configuration.isPressed
+            )
+    }
+}
+
+// ================================================================
+// MARK: - Album Art
+// ================================================================
+
+struct AlbumArtView: View {
+
+    let artwork: UIImage?
+    let side: CGFloat
+
+    var body: some View {
+
+        Group {
+
+            if let artwork {
+
+                Image(
+                    uiImage: artwork
+                )
+                .resizable()
+                .scaledToFill()
+
+            } else {
+
+                ZStack {
+
+                    Color.white.opacity(0.74)
+
+                    VStack(
+                        spacing: 12
+                    ) {
+
+                        Image(
+                            systemName:
+                                "airplayaudio"
+                        )
+                        .font(
+                            .system(
+                                size: 48,
+                                weight: .medium
+                            )
+                        )
+
+                        Text(
+                            "Waiting for AirPlay"
+                        )
+                        .font(
+                            .system(
+                                size: 20,
+                                weight: .medium,
+                                design: .rounded
+                            )
+                        )
+                    }
+                    .foregroundStyle(
+                        .black.opacity(0.45)
+                    )
+                }
+            }
+        }
+        .frame(
+            width: side,
+            height: side
+        )
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: 12,
+                style: .continuous
+            )
+        )
+        .overlay {
+
+            RoundedRectangle(
+                cornerRadius: 12,
+                style: .continuous
+            )
+            .stroke(
+                Color.white.opacity(0.85),
+                lineWidth: 1
+            )
+        }
+        .shadow(
+            color: .black.opacity(0.23),
+            radius: 30,
+            x: 0,
+            y: 16
+        )
+    }
+}
+
+// ================================================================
+// MARK: - Metadata
+// ================================================================
+
+struct MetadataView: View {
+
+    let title: String
+    let artist: String
+    let album: String
+
+    var body: some View {
+
+        VStack(
+            spacing: 5
+        ) {
+
+            Text(
+                title.isEmpty
+                    ? "Waiting for AirPlay"
+                    : title
+            )
+            .font(
+                .system(
+                    size: 31,
+                    weight: .bold,
+                    design: .rounded
+                )
+            )
+            .foregroundStyle(
+                .black
+            )
+            .lineLimit(1)
+            .truncationMode(.tail)
+
+            HStack(
+                spacing: 7
+            ) {
+
+                Text(
+                    artist.isEmpty
+                        ? "TVisualiser"
+                        : artist
+                )
+
+                if !album.isEmpty {
+
+                    Text("•")
+                        .foregroundStyle(
+                            .black.opacity(0.34)
+                        )
+
+                    Text(
+                        album
+                    )
+                }
+            }
+            .font(
+                .system(
+                    size: 17,
+                    weight: .medium,
+                    design: .rounded
+                )
+            )
+            .foregroundStyle(
+                .black.opacity(0.58)
+            )
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+    }
+}
+
+// ================================================================
+// MARK: - Audio Visualizer
+// ================================================================
+
+struct AudioVisualizerView: View {
+
+    let data: [Float]
+    let color: Color
+    let sensitivity: Double
+    let lineWidth: Double
+
+    /*
+     64 bars gives a good density on a TV display without
+     hammering SwiftUI with too many individual views.
+     */
+    private let barCount = 64
+
+    var body: some View {
+
+        GeometryReader { geometry in
+
+            let values = makeDisplayValues(
+                from: data,
+                count: barCount
+            )
+
+            HStack(
+                alignment: .center,
+                spacing: 5
+            ) {
+
+                ForEach(
+                    values.indices,
+                    id: \.self
+                ) { index in
+
+                    let normalized = values[index]
+
+                    let boosted = boostedLevel(
+                        normalized
+                    )
+
+                    let height =
+                        max(
+                            4,
+                            geometry.size.height
+                                * boosted
+                        )
+
+                    Capsule()
+                        .fill(
+                            color.opacity(
+                                0.86
+                            )
+                        )
+                        .frame(
+                            width: 5,
+                            height: height
+                        )
+                        .animation(
+                            .easeOut(
+                                duration: 0.07
+                            ),
+                            value: height
+                        )
+                }
+            }
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .center
+            )
+        }
+        .clipped()
+    }
+
+    // ------------------------------------------------------------
+    // Convert 96 source samples into 64 display bars.
+    // ------------------------------------------------------------
+
+    private func makeDisplayValues(
+        from source: [Float],
+        count: Int
+    ) -> [Float] {
+
+        guard !source.isEmpty else {
+
+            return Array(
+                repeating: 0.025,
+                count: count
+            )
+        }
+
+        /*
+         Average several adjacent samples into each bar.
+         */
+        var result = [Float]()
+        result.reserveCapacity(count)
+
+        let bucketSize =
+            Double(source.count)
+            / Double(count)
+
+        for index in 0..<count {
+
+            let start = Int(
+                Double(index)
+                    * bucketSize
+            )
+
+            let end = min(
+                source.count,
+                max(
+                    start + 1,
+                    Int(
+                        Double(index + 1)
+                            * bucketSize
+                    )
+                )
+            )
+
+            let bucket =
+                source[start..<end]
+
+            guard !bucket.isEmpty else {
+                result.append(0.025)
+                continue
+            }
+
+            /*
+             RMS-like calculation instead of a plain average.
+
+             This makes smaller transients much more visible.
+             */
+            var energy: Float = 0
+
+            for value in bucket {
+
+                let safe =
+                    max(
+                        0,
+                        min(
+                            1,
+                            value
+                        )
+                    )
+
+                energy += safe * safe
+            }
+
+            let rms = sqrt(
+                energy /
+                Float(bucket.count)
+            )
+
+            result.append(
+                rms.isFinite
+                    ? rms
+                    : 0
+            )
+        }
+
+        return result
+    }
+
+    // ------------------------------------------------------------
+    // Boost quiet audio.
+    // ------------------------------------------------------------
+
+    private func boostedLevel(
+        _ value: Float
+    ) -> CGFloat {
+
+        let v = max(
+            0,
+            min(
+                1,
+                value
+                    * Float(sensitivity)
+            )
+        )
+
+        /*
+         Power < 1 expands small values.
+
+         Example:
+
+         0.05 -> visually much larger
+         0.50 -> still controlled
+         1.00 -> maximum
+         */
+        let shaped =
+            pow(
+                v,
+                0.55
+            )
+
+        return CGFloat(
+            max(
+                0.035,
+                min(
+                    1,
+                    shaped
+                )
+            )
+        )
+    }
+}
+
+// ================================================================
+// MARK: - Media Control Card
+// ================================================================
+
+struct MediaControlCard: View {
+
+    let currentTime: TimeInterval
+    let duration: TimeInterval
+    let isPlaying: Bool
+
+    let onBackward: () -> Void
+    let onPlayPause: () -> Void
+    let onForward: () -> Void
+
+    var body: some View {
+
+        VStack(
+            spacing: 14
+        ) {
+
+            // ======================================================
+            // CONTROL BUTTONS
+            // ======================================================
+
+            HStack(
+                alignment: .center,
+                spacing: 30
+            ) {
+
+                // --------------------------------------------------
+                // BACK 10
+                // --------------------------------------------------
+
+                Button(
+                    action: onBackward
+                ) {
+
+                    Image(
+                        systemName:
+                            "gobackward.10"
+                    )
+                    .font(
+                        .system(
+                            size: 24,
+                            weight: .semibold
+                        )
+                    )
+                    .foregroundStyle(
+                        .black
+                    )
+                    .frame(
+                        width: 55,
+                        height: 55
+                    )
+                }
+                .buttonStyle(
+                    TVButtonStyle()
+                )
+
+                // --------------------------------------------------
+                // PLAY / PAUSE
+                // --------------------------------------------------
+
+                Button(
+                    action: onPlayPause
+                ) {
+
+                    Image(
+                        systemName:
+                            isPlaying
+                                ? "pause.fill"
+                                : "play.fill"
+                    )
+                    .font(
+                        .system(
+                            size: 25,
+                            weight: .bold
+                        )
+                    )
+                    .foregroundStyle(
+                        .white
+                    )
+                    .frame(
+                        width: 66,
+                        height: 66
+                    )
+                    .background(
+                        Color.black,
+                        in: Circle()
+                    )
+                }
+                .buttonStyle(
+                    TVButtonStyle()
+                )
+
+                // --------------------------------------------------
+                // FORWARD 10
+                // --------------------------------------------------
+
+                Button(
+                    action: onForward
+                ) {
+
+                    Image(
+                        systemName:
+                            "goforward.10"
+                    )
+                    .font(
+                        .system(
+                            size: 24,
+                            weight: .semibold
+                        )
+                    )
+                    .foregroundStyle(
+                        .black
+                    )
+                    .frame(
+                        width: 55,
+                        height: 55
+                    )
+                }
+                .buttonStyle(
+                    TVButtonStyle()
+                )
+            }
+
+            // ======================================================
+            // PROGRESS BAR
+            // ======================================================
+
+            HStack(
+                spacing: 12
+            ) {
+
+                Text(
+                    formatTime(
+                        currentTime
+                    )
+                )
+                .font(
+                    .system(
+                        size: 13,
+                        weight: .semibold,
+                        design: .rounded
+                    )
+                )
+                .foregroundStyle(
+                    .black.opacity(0.65)
+                )
+                .frame(
+                    width: 42,
+                    alignment: .leading
+                )
+
+                MediaProgressBar(
+                    progress: progress
+                )
+
+                Text(
+                    formatTime(
+                        duration
+                    )
+                )
+                .font(
+                    .system(
+                        size: 13,
+                        weight: .semibold,
+                        design: .rounded
+                    )
+                )
+                .foregroundStyle(
+                    .black.opacity(0.65)
+                )
+                .frame(
+                    width: 42,
+                    alignment: .trailing
+                )
+            }
+        }
+        .padding(
+            .horizontal,
+            30
+        )
+        .padding(
+            .vertical,
+            18
+        )
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(
+                cornerRadius: 26,
+                style: .continuous
+            )
+        )
+        .overlay {
+
+            RoundedRectangle(
+                cornerRadius: 26,
+                style: .continuous
+            )
+            .stroke(
+                Color.white.opacity(0.75),
+                lineWidth: 1
+            )
+        }
+        .shadow(
+            color: .black.opacity(0.15),
+            radius: 28,
+            x: 0,
+            y: 14
+        )
+    }
+
+    private var progress: CGFloat {
+
+        guard duration > 0 else {
+            return 0
+        }
+
+        return CGFloat(
+            min(
+                1,
+                max(
+                    0,
+                    currentTime / duration
+                )
+            )
+        )
+    }
+
+    private func formatTime(
+        _ seconds: TimeInterval
+    ) -> String {
+
+        let total =
+            Int(
+                max(
+                    0,
+                    seconds.rounded()
+                )
+            )
+
+        let minutes =
+            total / 60
+
+        let seconds =
+            total % 60
+
+        return String(
+            format: "%d:%02d",
+            minutes,
+            seconds
+        )
+    }
+}
+
+// ================================================================
+// MARK: - Progress Bar
+// ================================================================
+
+struct MediaProgressBar: View {
+
+    let progress: CGFloat
+
+    var body: some View {
+
+        GeometryReader { geometry in
+
+            let width =
+                geometry.size.width
+
+            let progressWidth =
+                width * progress
+
+            ZStack(
+                alignment: .leading
+            ) {
+
+                Capsule()
+                    .fill(
+                        Color.black.opacity(0.16)
+                    )
+                    .frame(
+                        height: 4
+                    )
+
+                Capsule()
+                    .fill(
+                        Color.black
+                    )
+                    .frame(
+                        width: max(
+                            0,
+                            progressWidth
+                        ),
+                        height: 4
+                    )
+
+                Circle()
+                    .fill(
+                        Color.black
+                    )
+                    .frame(
+                        width: 12,
+                        height: 12
+                    )
+                    .offset(
+                        x: max(
+                            0,
+                            min(
+                                progressWidth - 6,
+                                width - 12
+                            )
+                        )
+                    )
+            }
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity
+            )
+        }
+        .frame(
+            height: 20
+        )
+    }
+}
+
+// ================================================================
+// MARK: - Clock
+// ================================================================
+
+struct ClockView: View {
+
+    let date: Date
+
+    var body: some View {
+
+        VStack(
+            alignment: .trailing,
+            spacing: 0
+        ) {
+
+            Text(
+                date,
+                format:
+                    .dateTime
+                    .hour()
+                    .minute()
+            )
+            .font(
+                .system(
+                    size: 40,
+                    weight: .bold,
+                    design: .rounded
+                )
+            )
+            .monospacedDigit()
+            .foregroundStyle(
+                .black
+            )
+
+            Text(
+                date,
+                format:
+                    .dateTime
+                    .weekday(
+                        .abbreviated
+                    )
+            )
+            .font(
+                .system(
+                    size: 21,
+                    weight: .bold,
+                    design: .rounded
+                )
+            )
+            .foregroundStyle(
+                .black.opacity(0.85)
+            )
+        }
+    }
+}
+
+// ================================================================
+// MARK: - Settings View
+// ================================================================
+
+struct SettingsView: View {
+
+    @Environment(
+        \.presentationMode
+    )
+    var presentationMode
+
+    @AppStorage("showClock")
+    private var showClock: Bool = true
+
+    @AppStorage("autoOpenOnAirPlay")
+    private var autoOpenOnAirPlay: Bool = false
+
+    @AppStorage("dynamicWaveformColor")
+    private var dynamicWaveformColor: Bool = true
+
+    @AppStorage("waveformLineWidth")
+    private var waveformLineWidth: Double = 2.0
+
+    @AppStorage("waveformSensitivity")
+    private var waveformSensitivity: Double = 1.0
+
+    var body: some View {
+
+        NavigationView {
+
+            Form {
+
+                Section {
+
+                    Text(
+                        "TVisualiser"
+                    )
+                    .font(
+                        .title2.bold()
+                    )
+
+                    Text(
+                        "AirPlay receiver is active on port 5000."
+                    )
+                    .foregroundStyle(
+                        .secondary
+                    )
+                }
+
+                Section(
+                    "Display"
+                ) {
+
+                    Toggle(
+                        "Show clock",
+                        isOn: $showClock
+                    )
+                }
+
+                Section(
+                    "AirPlay"
+                ) {
+
+                    Toggle(
+                        "Auto-show Now Playing on connect",
+                        isOn: $autoOpenOnAirPlay
+                    )
+
+                    Text(
+                        "If Settings is open when a stream begins, it will close automatically."
+                    )
+                    .font(
+                        .footnote
+                    )
+                    .foregroundStyle(
+                        .secondary
+                    )
+                }
+
+                Section(
+                    "Waveform"
+                ) {
+
+                    Toggle(
+                        "Dynamic color from cover art",
+                        isOn: $dynamicWaveformColor
+                    )
+
+                    ValueStepper(
+                        label: "Line width",
+                        value: $waveformLineWidth,
+                        range: 1...6,
+                        step: 0.5
+                    )
+
+                    ValueStepper(
+                        label: "Sensitivity",
+                        value: $waveformSensitivity,
+                        range: 0.5...2.0,
+                        step: 0.1
+                    )
+                }
+
+                Section(
+                    "Remote Controls"
+                ) {
+
+                    Text(
+                        "Play/Pause button — toggle playback"
+                    )
+
+                    Text(
+                        "Menu button — close settings / go back"
+                    )
+                }
+            }
+            .navigationTitle(
+                "Settings"
+            )
+            .toolbar {
+
+                ToolbarItem(
+                    placement:
+                        .confirmationAction
+                ) {
+
+                    Button(
+                        "Done"
+                    ) {
+
+                        presentationMode
+                            .wrappedValue
+                            .dismiss()
+                    }
                 }
             }
         }
     }
 }
 
+// ================================================================
+// MARK: - Value Stepper
+// ================================================================
+
+struct ValueStepper: View {
+
+    let label: String
+
+    @Binding var value: Double
+
+    let range: ClosedRange<Double>
+
+    let step: Double
+
+    var body: some View {
+
+        HStack {
+
+            Text(
+                "\(label): \(String(format: "%.1f", value))"
+            )
+
+            Spacer()
+
+            HStack(
+                spacing: 20
+            ) {
+
+                Button {
+
+                    value =
+                        max(
+                            range.lowerBound,
+                            value - step
+                        )
+
+                } label: {
+
+                    Image(
+                        systemName:
+                            "minus.circle"
+                    )
+                }
+                .disabled(
+                    value <= range.lowerBound
+                )
+
+                Button {
+
+                    value =
+                        min(
+                            range.upperBound,
+                            value + step
+                        )
+
+                } label: {
+
+                    Image(
+                        systemName:
+                            "plus.circle"
+                    )
+                }
+                .disabled(
+                    value >= range.upperBound
+                )
+            }
+        }
+    }
+}
+
+// ================================================================
+// MARK: - Preview
+// ================================================================
+
 #Preview {
+
     ContentView()
-        .environmentObject(ReceiverStore())
+        .environmentObject(
+            ReceiverStore()
+        )
 }
