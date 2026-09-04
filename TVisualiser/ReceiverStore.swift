@@ -17,7 +17,7 @@ final class ReceiverStore: ObservableObject {
     @Published private(set) var audioLevel: Float = 0.08
     @Published private(set) var waveform = Array(repeating: Float(0), count: 96)
     @Published private(set) var currentTime: TimeInterval = 0
-    @Published private(set) var duration: TimeInterval = 210
+    @Published private(set) var duration: TimeInterval = 0
 
     private let server = RTSPServer()
     private let playback = AudioPlaybackEngine()
@@ -46,7 +46,11 @@ final class ReceiverStore: ObservableObject {
                     self.audioLevel *= 0.82
                 }
                 if self.isPlaying {
-                    self.currentTime = min(self.currentTime + 0.1, self.duration)
+                    if self.duration > 0 {
+                        self.currentTime = min(self.currentTime + 0.1, self.duration)
+                    } else {
+                        self.currentTime = 0
+                    }
                 }
             }
         }
@@ -74,13 +78,19 @@ final class ReceiverStore: ObservableObject {
     }
 
     func skipForward() {
-        currentTime = min(duration, currentTime + 10)
+        if duration > 0 {
+            currentTime = min(duration, currentTime + 10)
+        } else {
+            currentTime = 0
+        }
     }
 
     private func handleAnnounce(_ request: String) {
         DebugSettings.log("ANNOUNCE received")
         isReceiving = true
         lastPacketTime = Date()
+        currentTime = 0
+        duration = 0
         let fields = request.components(separatedBy: "\r\n")
         for field in fields {
             if field.hasPrefix("a=min-latency:") { continue }
@@ -108,6 +118,20 @@ final class ReceiverStore: ObservableObject {
                 if let image = normalizeArtwork(valueData) {
                     artwork = image
                     waveformColor = image.averageColor()
+                }
+            } else if code == "mper" {
+                guard valueData.count >= 4 else { continue }
+                let raw = Array(valueData.prefix(4))
+                var value: UInt32 = 0
+                for byte in raw {
+                    value = (value << 8) | UInt32(byte)
+                }
+                let ms = Double(value)
+                if ms > 0 {
+                    duration = max(0, ms / 1000.0)
+                    if currentTime > duration {
+                        currentTime = 0
+                    }
                 }
             } else if let value = String(data: valueData, encoding: .utf8) {
                 let cleaned = sanitizeText(value)

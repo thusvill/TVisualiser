@@ -206,14 +206,15 @@ class AirPlayBridge:
         self.receive_response()
 
     def send_metadata(self, metadata):
-        """Sends track title, artist, album, and artwork without dropping audio stream."""
-        # Fixed: Passed full 'metadata' dict instead of metadata["source"]
+        """Sends track title, artist, album, artwork, and runtime metadata without dropping audio stream."""
         artwork = extract_artwork_bytes(metadata)
-        
+        duration_ms = int(metadata.get("duration_ms", 210000))
+
         daap_payload = pack_daap_tag('minm', metadata["title"]) + \
                        pack_daap_tag('asar', metadata["artist"]) + \
-                       pack_daap_tag('asal', metadata["album"])
-        
+                       pack_daap_tag('asal', metadata["album"]) + \
+                       pack_daap_tag('mper', struct.pack('>I', duration_ms))
+
         if artwork:
             daap_payload += pack_daap_tag('covr', artwork)
             print(f"[*] Artwork attached ({len(artwork)} bytes)")

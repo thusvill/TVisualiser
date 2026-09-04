@@ -51,112 +51,72 @@ struct ContentView: View {
 
             let width = geometry.size.width
             let height = geometry.size.height
-
-            /*
-             The artwork is sized independently from the bottom
-             player card.
-
-             This is important:
-
-             The player card does NOT participate in the vertical
-             layout of the artwork section.
-
-             Therefore the player controls can never be pushed
-             outside the screen by the waveform or artwork.
-             */
-
             let artworkSize = min(
                 width * 0.27,
-                height * 0.40,
-                350
+                height * 0.34,
+                330
             )
+            let playerCardWidth = min(width * 0.48, 760)
 
             ZStack {
 
                 // ==================================================
-                // BACKGROUND
-                // ==================================================
-
-                background
-
-                // ==================================================
-                // CENTER CONTENT
+                // Fixed player composition
                 // ==================================================
 
                 VStack(spacing: 0) {
 
-                    Spacer(
-                        minLength: 115
-                    )
-
-                    // ------------------------------------------------
-                    // ALBUM ART
-                    // ------------------------------------------------
-
-                    AlbumArtView(
-                        artwork: receiver.artwork,
-                        side: artworkSize
-                    )
-
-                    // ------------------------------------------------
-                    // METADATA
-                    // ------------------------------------------------
-
-                    Spacer(
-                        minLength: 22
-                    )
-
-                    MetadataView(
-                        title: receiver.trackTitle,
-                        artist: receiver.artist,
-                        album: receiver.album
+                    HeaderView(
+                        showClock: showClock,
+                        onSettings: {
+                            showingSettings = true
+                        }
                     )
                     .frame(
-                        maxWidth: 720
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: .top
                     )
 
-                    // ------------------------------------------------
-                    // WAVEFORM
-                    // ------------------------------------------------
+                    Spacer(minLength: 0)
 
-                    Spacer(
-                        minLength: 20
-                    )
+                    VStack(spacing: 18) {
 
-                    AudioVisualizerView(
-                        data: receiver.waveform,
-                        color: dynamicWaveformColor
-                            ? receiver.waveformColor
-                            : .black,
-                        sensitivity: waveformSensitivity,
-                        lineWidth: waveformLineWidth
-                    )
+                        AlbumArtView(
+                            artwork: receiver.artwork,
+                            side: artworkSize
+                        )
+
+                        MetadataView(
+                            title: receiver.trackTitle,
+                            artist: receiver.artist,
+                            album: receiver.album
+                        )
+                        .frame(
+                            maxWidth: 720
+                        )
+
+                        AudioVisualizerView(
+                            data: receiver.waveform,
+                            color: dynamicWaveformColor
+                                ? receiver.waveformColor
+                                : .black,
+                            sensitivity: waveformSensitivity,
+                            lineWidth: waveformLineWidth
+                        )
+                        .frame(
+                            width: min(width * 0.82, 1100),
+                            height: 72
+                        )
+                    }
                     .frame(
-                        width: min(
-                            width * 0.78,
-                            1100
-                        ),
-                        height: 90
+                        maxWidth: .infinity,
+                        maxHeight: min(height * 0.62, 440),
+                        alignment: .center
                     )
+                    .padding(.top, 24)
 
-                    Spacer()
-                }
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity
-                )
-
-                // ==================================================
-                // BOTTOM MEDIA CONTROL BAR
-                //
-                // This is anchored to the bottom of the ZStack.
-                // It does NOT affect the vertical placement of the
-                // artwork, metadata or waveform.
-                // ==================================================
-
-                VStack {
-
-                    Spacer()
+                    Spacer(minLength: 0)
 
                     MediaControlCard(
                         currentTime: receiver.currentTime,
@@ -173,28 +133,16 @@ struct ContentView: View {
                         }
                     )
                     .frame(
-                        width: min(
-                            width * 0.50,
-                            760
-                        )
+                        width: playerCardWidth
                     )
-                    .padding(
-                        .bottom,
-                        34
-                    )
+                    .padding(.bottom, 28)
                 }
-
-                // ==================================================
-                // HEADER
-                // ==================================================
-
-                HeaderView(
-                    showClock: showClock,
-                    onSettings: {
-                        showingSettings = true
-                    }
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
                 )
             }
+            .background(background.ignoresSafeArea())
         }
         .preferredColorScheme(.light)
 
@@ -253,44 +201,40 @@ private extension ContentView {
                 )
                 .resizable()
                 .scaledToFill()
-                .scaleEffect(1.18)
+                .scaleEffect(1.25)
                 .blur(
-                    radius: 75
+                    radius: 80
                 )
-                .saturation(0.60)
-                .opacity(0.52)
+                .saturation(1.15)
+                .opacity(0.40)
                 .ignoresSafeArea()
-
-                // --------------------------------------------------
-                // Artwork color glow
-                // --------------------------------------------------
 
                 RadialGradient(
                     colors: [
                         receiver.waveformColor
-                            .opacity(0.30),
+                            .opacity(0.34),
 
                         receiver.waveformColor
-                            .opacity(0.10),
+                            .opacity(0.18),
 
                         Color.clear
                     ],
                     center: .center,
-                    startRadius: 50,
-                    endRadius: 750
+                    startRadius: 80,
+                    endRadius: 800
                 )
                 .ignoresSafeArea()
             }
 
             // ------------------------------------------------------
-            // White readability wash
+            // Soft warm wash to keep the blur visible
             // ------------------------------------------------------
 
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.78),
-                    Color.white.opacity(0.18),
-                    Color.white.opacity(0.62)
+                    Color.white.opacity(0.70),
+                    Color(white: 0.92).opacity(0.28),
+                    Color(white: 0.95).opacity(0.58)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -298,16 +242,23 @@ private extension ContentView {
             .ignoresSafeArea()
 
             // ------------------------------------------------------
+            // Subtle darkening to preserve contrast
+            // ------------------------------------------------------
+
+            Color.black.opacity(0.06)
+                .ignoresSafeArea()
+
+            // ------------------------------------------------------
             // Center highlight
             // ------------------------------------------------------
 
             RadialGradient(
                 colors: [
-                    Color.white.opacity(0.20),
+                    Color.white.opacity(0.25),
                     Color.clear
                 ],
                 center: .center,
-                startRadius: 100,
+                startRadius: 120,
                 endRadius: 700
             )
             .ignoresSafeArea()
