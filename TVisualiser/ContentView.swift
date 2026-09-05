@@ -37,8 +37,7 @@ struct ContentView: View {
     // State
     // ------------------------------------------------------------
 
-    @State private var showingSettings = false
-    @State private var showingMediaLibrary = false
+    @State private var presentedSheet: PresentedSheet?
 
     @Namespace private var focusNamespace
 
