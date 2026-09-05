@@ -106,9 +106,17 @@ struct ContentView: View {
     .onPlayPauseCommand {
         receiver.togglePlayback()
     }
-    // NOTE: no ContentView-level onMoveCommand at all.
-    .sheet(isPresented: $showingSettings) { SettingsView() }
-    .sheet(isPresented: $showingMediaLibrary) { MediaLibraryView() }
+    
+    .sheet(isPresented: $showingSettings) {
+    SettingsView()
+        .environmentObject(receiver)
+        .environmentObject(ftp)
+}
+.sheet(isPresented: $showingMediaLibrary) {
+    MediaLibraryView()
+        .environmentObject(receiver)
+        .environmentObject(ftp)
+}
 }
 }
 
@@ -142,67 +150,67 @@ private extension ContentView {
                 )
                 .resizable()
                 .scaledToFill()
-                .scaleEffect(1.25)
+                .scaleEffect(1.2)
                 .blur(
-                    radius: 80
+                    radius: 20
                 )
                 .saturation(1.15)
-                .opacity(0.40)
+                .opacity(1)
                 .ignoresSafeArea()
 
-                RadialGradient(
-                    colors: [
-                        receiver.waveformColor
-                            .opacity(0.34),
-
-                        receiver.waveformColor
-                            .opacity(0.18),
-
-                        Color.clear
-                    ],
-                    center: .center,
-                    startRadius: 80,
-                    endRadius: 800
-                )
-                .ignoresSafeArea()
+//                RadialGradient(
+//                    colors: [
+//                        receiver.waveformColor
+//                            .opacity(0.34),
+//
+//                        receiver.waveformColor
+//                            .opacity(0.18),
+//
+//                        Color.clear
+//                    ],
+//                    center: .center,
+//                    startRadius: 5,
+//                    endRadius: 50
+//                )
+//                .ignoresSafeArea()
             }
 
             // ------------------------------------------------------
             // Soft warm wash to keep the blur visible
             // ------------------------------------------------------
 
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.70),
-                    Color(white: 0.92).opacity(0.28),
-                    Color(white: 0.95).opacity(0.58)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+//            LinearGradient(
+//                colors: [
+//                    Color.white.opacity(0.00),
+//                    Color(white: 0.92).opacity(0.08),
+//                    Color(white: 0.95).opacity(0.08)
+//                ],
+//                startPoint: .top,
+//                endPoint: .bottom
+//            )
+//            .ignoresSafeArea()
 
             // ------------------------------------------------------
             // Subtle darkening to preserve contrast
             // ------------------------------------------------------
 
-            Color.black.opacity(0.06)
+            Color.black.opacity(0.08)
                 .ignoresSafeArea()
 
             // ------------------------------------------------------
             // Center highlight
             // ------------------------------------------------------
 
-            RadialGradient(
-                colors: [
-                    Color.white.opacity(0.25),
-                    Color.clear
-                ],
-                center: .center,
-                startRadius: 120,
-                endRadius: 700
-            )
-            .ignoresSafeArea()
+//            RadialGradient(
+//                colors: [
+//                    Color.white.opacity(0.25),
+//                    Color.clear
+//                ],
+//                center: .center,
+//                startRadius: 120,
+//                endRadius: 700
+//            )
+//            .ignoresSafeArea()
         }
     }
 
@@ -1095,58 +1103,54 @@ struct MediaLibraryView: View {
     @State private var errorMessage = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Media Library")
-                .font(.largeTitle.bold())
-                .padding(.horizontal, 64)
-                .padding(.top, 44)
-                .padding(.bottom, 18)
 
-            List {
-                Section("FTP") {
-                    if !ftp.isConfigured {
-                        Text("Configure the local FTP server in Settings.")
-                        Button("Open Settings") {
-                            presentationMode.wrappedValue.dismiss()
-                        }
-                    } else {
-                        Button(isLoading ? "Loading files..." : "Refresh files") { refresh() }
-                            .disabled(isLoading)
-
-                        if tracks.isEmpty && !isLoading {
-                            Text("No audio or video files available to this app.")
-                                .foregroundStyle(.secondary)
-                        }
-
-                        ForEach(tracks) { track in
-                            Button {
-                                let source = FTPMediaSource(account: ftp)
-                                player.load(track: track, from: source)
-                                presentationMode.wrappedValue.dismiss()
-                            } label: {
-                                Label(track.title, systemImage: "play.circle")
-                            }
-                            .buttonStyle(TVButtonStyle())
-                        }
+    NavigationView {
+        List {
+            Section("FTP") {
+                if !ftp.isConfigured {
+                    Text("Configure the local FTP server in Settings.")
+                    Button("Open Settings") {
+                        presentationMode.wrappedValue.dismiss()
                     }
-                }
+                } else {
+                    Button(isLoading ? "Loading files..." : "Refresh files") { refresh() }
+                        .disabled(isLoading)
 
-                if !errorMessage.isEmpty {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                    if tracks.isEmpty && !isLoading {
+                        Text("No audio or video files available to this app.")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(tracks) { track in
+                        Button {
+                            let source = FTPMediaSource(account: ftp)
+                            player.load(track: track, from: source)
+                            presentationMode.wrappedValue.dismiss()
+                        } label: {
+                            Label(track.title, systemImage: "play.circle")
+                        }
+                        .buttonStyle(TVButtonStyle())
                     }
                 }
             }
-            .task {
-                if ftp.isConfigured {
-                    refresh()
+
+            if !errorMessage.isEmpty {
+                Section {
+                    Text(errorMessage).foregroundStyle(.red)
                 }
             }
         }
-        .onExitCommand {
-            presentationMode.wrappedValue.dismiss()
+        .navigationTitle("Media Library")
+        .task {
+            if ftp.isConfigured {
+                refresh()
+            }
         }
     }
+    .onExitCommand {
+        presentationMode.wrappedValue.dismiss()
+    }
+}
 
     private func refresh() {
         isLoading = true
@@ -1191,90 +1195,47 @@ struct SettingsView: View {
 
     var body: some View {
 
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Settings")
-                .font(.largeTitle.bold())
-                .padding(.horizontal, 64)
-                .padding(.top, 44)
-                .padding(.bottom, 18)
+    NavigationView {
+        Form {
 
-            Form {
-
-                Section {
-
-                    Text(
-                        "TVisualiser"
-                    )
-                    .font(
-                        .title2.bold()
-                    )
-
-                    Text(
-                        "Choose a source to begin playback."
-                    )
-                    .foregroundStyle(
-                        .secondary
-                    )
-                }
-
-                Section(
-                    "Display"
-                ) {
-
-                    Toggle(
-                        "Show clock",
-                        isOn: $showClock
-                    )
-                }
-
-                Section("FTP") {
-                    TextField("Server address", text: $ftp.host)
-                    TextField("Port", value: $ftp.port, format: .number)
-                    TextField("Username", text: $ftp.username)
-                    SecureField("Password", text: $ftp.password)
-                    TextField("Media folder", text: $ftp.path)
-                    Button("Save FTP Settings") { ftp.save() }
-                    Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section(
-                    "Waveform"
-                ) {
-
-                    Toggle(
-                        "Dynamic color from cover art",
-                        isOn: $dynamicWaveformColor
-                    )
-
-                    ValueStepper(
-                        label: "Line width",
-                        value: $waveformLineWidth,
-                        range: 1...6,
-                        step: 0.5
-                    )
-
-                    ValueStepper(
-                        label: "Sensitivity",
-                        value: $waveformSensitivity,
-                        range: 0.5...2.0,
-                        step: 0.1
-                    )
-                }
+            Section {
+                Text("TVisualiser")
+                    .font(.title2.bold())
+                Text("Choose a source to begin playback.")
+                    .foregroundStyle(.secondary)
             }
-            .task {
+
+            Section("Display") {
+                Toggle("Show clock", isOn: $showClock)
             }
-            .onDisappear {
-                ftp.save()
+
+            Section("FTP") {
+                TextField("Server address", text: $ftp.host)
+                TextField("Port", value: $ftp.port, format: .number)
+                TextField("Username", text: $ftp.username)
+                SecureField("Password", text: $ftp.password)
+                TextField("Media folder", text: $ftp.path)
+                Button("Save FTP Settings") { ftp.save() }
+                Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Waveform") {
+                Toggle("Dynamic color from cover art", isOn: $dynamicWaveformColor)
+                ValueStepper(label: "Line width", value: $waveformLineWidth, range: 1...6, step: 0.5)
+                ValueStepper(label: "Sensitivity", value: $waveformSensitivity, range: 0.5...2.0, step: 0.1)
             }
         }
-        .onExitCommand {
-            presentationMode
-                .wrappedValue
-                .dismiss()
+        .navigationTitle("Settings")
+        .onDisappear {
+            ftp.save()
         }
     }
+    .onExitCommand {
+        presentationMode.wrappedValue.dismiss()
+    }
+}
 }
 
 // ================================================================
