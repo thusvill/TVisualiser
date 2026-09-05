@@ -37,8 +37,7 @@ struct ContentView: View {
     // State
     // ------------------------------------------------------------
 
-    @State private var showingSettings = false
-    @State private var showingMediaLibrary = false
+    @State private var presentedSheet: PresentedSheet?
 
     @Namespace private var focusNamespace
 
@@ -70,10 +69,10 @@ struct ContentView: View {
                     HeaderView(
                         showClock: showClock,
                         onMedia: {
-                            showingMediaLibrary = true
+                            presentedSheet = .mediaLibrary
                         },
                         onSettings: {
-                            showingSettings = true
+                            presentedSheet = .settings
                         }
                     )
                     .frame(
@@ -156,17 +155,28 @@ struct ContentView: View {
             receiver.togglePlayback()
         }
 
-        .sheet(
-            isPresented: $showingSettings
-        ) {
-            SettingsView()
-        }
-        .sheet(
-            isPresented: $showingMediaLibrary
-        ) {
-            MediaLibraryView()
+        .fullScreenCover(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .settings:
+                SettingsView()
+                    .environmentObject(receiver)
+                    .environmentObject(ftp)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .mediaLibrary:
+                MediaLibraryView()
+                    .environmentObject(receiver)
+                    .environmentObject(ftp)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .focusSection()
+    }
+
+    private enum PresentedSheet: Identifiable {
+        case settings
+        case mediaLibrary
+
+        var id: Self { self }
     }
 }
 
