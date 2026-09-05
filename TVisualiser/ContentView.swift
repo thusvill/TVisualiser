@@ -14,7 +14,8 @@ import UIKit
 
 struct ContentView: View {
 
-    @EnvironmentObject private var receiver: ReceiverStore
+    @EnvironmentObject private var receiver: MediaPlayerStore
+    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
 
     // ------------------------------------------------------------
     // Settings
@@ -22,9 +23,6 @@ struct ContentView: View {
 
     @AppStorage("showClock")
     private var showClock: Bool = true
-
-    @AppStorage("autoOpenOnAirPlay")
-    private var autoOpenOnAirPlay: Bool = false
 
     @AppStorage("dynamicWaveformColor")
     private var dynamicWaveformColor: Bool = true
@@ -40,6 +38,9 @@ struct ContentView: View {
     // ------------------------------------------------------------
 
     @State private var showingSettings = false
+    @State private var showingMediaLibrary = false
+
+    @Namespace private var focusNamespace
 
     // ============================================================
     // MARK: Body
@@ -68,6 +69,9 @@ struct ContentView: View {
 
                     HeaderView(
                         showClock: showClock,
+                        onMedia: {
+                            showingMediaLibrary = true
+                        },
                         onSettings: {
                             showingSettings = true
                         }
@@ -130,7 +134,8 @@ struct ContentView: View {
                         },
                         onForward: {
                             receiver.skipForward()
-                        }
+                        },
+                        focusNamespace: focusNamespace
                     )
                     .frame(
                         width: playerCardWidth
@@ -146,21 +151,9 @@ struct ContentView: View {
         }
         .preferredColorScheme(.light)
 
-        // Required for tvOS remote interaction.
-        .focusable()
-
         // Remote Play/Pause button.
         .onPlayPauseCommand {
             receiver.togglePlayback()
-        }
-
-        .onChange(
-            of: receiver.isReceiving
-        ) { newValue in
-
-            handleReceivingStateChange(
-                newValue
-            )
         }
 
         .sheet(
@@ -168,6 +161,12 @@ struct ContentView: View {
         ) {
             SettingsView()
         }
+        .sheet(
+            isPresented: $showingMediaLibrary
+        ) {
+            MediaLibraryView()
+        }
+        .focusSection()
     }
 }
 
@@ -265,17 +264,6 @@ private extension ContentView {
         }
     }
 
-    func handleReceivingStateChange(
-        _ isReceiving: Bool
-    ) {
-
-        if isReceiving &&
-            autoOpenOnAirPlay &&
-            showingSettings {
-
-            showingSettings = false
-        }
-    }
 }
 
 // ================================================================
@@ -285,6 +273,7 @@ private extension ContentView {
 struct HeaderView: View {
 
     let showClock: Bool
+    let onMedia: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -298,6 +287,16 @@ struct HeaderView: View {
             VStack {
 
                 HStack {
+
+                    Button(action: onMedia) {
+                        Label("Media", systemImage: "music.note.list")
+                            .font(.system(size: 17, weight: .medium, design: .rounded))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 11)
+                            .background(Color.white.opacity(0.82), in: Capsule())
+                    }
+                    .buttonStyle(TVButtonStyle())
 
                     Button(
                         action: onSettings
@@ -428,6 +427,8 @@ struct HeaderView: View {
 
 struct TVButtonStyle: ButtonStyle {
 
+    @Environment(\.isFocused) private var isFocused
+
     func makeBody(
         configuration: Configuration
     ) -> some View {
@@ -443,11 +444,33 @@ struct TVButtonStyle: ButtonStyle {
                     ? 0.75
                     : 1.0
             )
+            .scaleEffect(
+                isFocused
+                    ? 1.10
+                    : 1.0
+            )
+            .overlay {
+                if isFocused {
+                    RoundedRectangle(
+                        cornerRadius: 16,
+                        style: .continuous
+                    )
+                    .stroke(
+                        Color.black.opacity(0.72),
+                        lineWidth: 3
+                    )
+                    .padding(-7)
+                }
+            }
             .animation(
                 .easeOut(
                     duration: 0.10
                 ),
                 value: configuration.isPressed
+            )
+            .animation(
+                .easeOut(duration: 0.12),
+                value: isFocused
             )
     }
 }
@@ -485,7 +508,7 @@ struct AlbumArtView: View {
 
                         Image(
                             systemName:
-                                "airplayaudio"
+                                "music.note"
                         )
                         .font(
                             .system(
@@ -495,7 +518,7 @@ struct AlbumArtView: View {
                         )
 
                         Text(
-                            "Waiting for AirPlay"
+                            "Select a media source"
                         )
                         .font(
                             .system(
@@ -559,7 +582,7 @@ struct MetadataView: View {
 
             Text(
                 title.isEmpty
-                    ? "Waiting for AirPlay"
+                        ? "Select a media source"
                     : title
             )
             .font(
@@ -835,6 +858,15 @@ struct MediaControlCard: View {
     let onBackward: () -> Void
     let onPlayPause: () -> Void
     let onForward: () -> Void
+    let focusNamespace: Namespace.ID
+
+    private enum Control: Hashable {
+        case backward
+        case playPause
+        case forward
+    }
+
+    @FocusState private var focusedControl: Control?
 
     var body: some View {
 
@@ -880,6 +912,10 @@ struct MediaControlCard: View {
                 .buttonStyle(
                     TVButtonStyle()
                 )
+                .focused(
+                    $focusedControl,
+                    equals: .backward
+                )
 
                 // --------------------------------------------------
                 // PLAY / PAUSE
@@ -916,6 +952,14 @@ struct MediaControlCard: View {
                 .buttonStyle(
                     TVButtonStyle()
                 )
+                .focused(
+                    $focusedControl,
+                    equals: .playPause
+                )
+                .prefersDefaultFocus(
+                    true,
+                    in: focusNamespace
+                )
 
                 // --------------------------------------------------
                 // FORWARD 10
@@ -945,6 +989,10 @@ struct MediaControlCard: View {
                 }
                 .buttonStyle(
                     TVButtonStyle()
+                )
+                .focused(
+                    $focusedControl,
+                    equals: .forward
                 )
             }
 
@@ -1206,10 +1254,105 @@ struct ClockView: View {
 }
 
 // ================================================================
+// MARK: - Media Library
+// ================================================================
+
+struct MediaLibraryView: View {
+
+    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
+    @EnvironmentObject private var player: MediaPlayerStore
+    @Environment(\.presentationMode) private var presentationMode
+
+    @State private var tracks: [MediaTrack] = []
+    @State private var isLoading = false
+    @State private var errorMessage = ""
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("Google Drive") {
+                    switch googleDrive.state {
+                    case .signedOut:
+                        Text("Connect Google Drive in Settings first.")
+                        Button("Open Settings") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    case .waitingForApproval:
+                        Text("Finish Google sign-in in your browser.")
+                        Text("Code: \(googleDrive.userCode)")
+                            .font(.title2.monospaced())
+                    case .failed(let message):
+                        Text(message).foregroundStyle(.red)
+                    case .signedIn:
+                        Button(isLoading ? "Loading files..." : "Refresh files") {
+                            refresh()
+                        }
+                        .disabled(isLoading)
+
+                        if tracks.isEmpty && !isLoading {
+                            Text("No audio or video files available to this app.")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(tracks) { track in
+                            Button {
+                                let source = GoogleDriveMediaSource(account: googleDrive)
+                                player.load(track: track, from: source)
+                                presentationMode.wrappedValue.dismiss()
+                            } label: {
+                                Label(track.title, systemImage: "play.circle")
+                            }
+                            .buttonStyle(TVButtonStyle())
+                        }
+                    }
+                }
+
+                if !errorMessage.isEmpty {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Media Library")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            }
+            .task {
+                if case .signedIn = googleDrive.state {
+                    refresh()
+                }
+            }
+        }
+    }
+
+    private func refresh() {
+        isLoading = true
+        errorMessage = ""
+        Task {
+            do {
+                tracks = try await GoogleDriveMediaSource(account: googleDrive).tracks()
+            } catch {
+                tracks = []
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+}
+
+// ================================================================
 // MARK: - Settings View
 // ================================================================
 
 struct SettingsView: View {
+
+    @EnvironmentObject private var telegram: TelegramAccountStore
+    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
+    @EnvironmentObject private var player: MediaPlayerStore
 
     @Environment(
         \.presentationMode
@@ -1219,9 +1362,6 @@ struct SettingsView: View {
     @AppStorage("showClock")
     private var showClock: Bool = true
 
-    @AppStorage("autoOpenOnAirPlay")
-    private var autoOpenOnAirPlay: Bool = false
-
     @AppStorage("dynamicWaveformColor")
     private var dynamicWaveformColor: Bool = true
 
@@ -1230,6 +1370,9 @@ struct SettingsView: View {
 
     @AppStorage("waveformSensitivity")
     private var waveformSensitivity: Double = 1.0
+
+    @State private var driveTracks: [MediaTrack] = []
+    @State private var driveIsLoading = false
 
     var body: some View {
 
@@ -1247,7 +1390,7 @@ struct SettingsView: View {
                     )
 
                     Text(
-                        "AirPlay receiver is active on port 5000."
+                        "Choose a source to begin playback."
                     )
                     .foregroundStyle(
                         .secondary
@@ -1264,24 +1407,61 @@ struct SettingsView: View {
                     )
                 }
 
-                Section(
-                    "AirPlay"
-                ) {
+                Section("Telegram") {
+                    TextField("Phone number", text: $telegram.phoneNumber)
 
-                    Toggle(
-                        "Auto-show Now Playing on connect",
-                        isOn: $autoOpenOnAirPlay
-                    )
+                    switch telegram.state {
+                    case .signedIn(let name):
+                        Label("Signed in as \(name)", systemImage: "checkmark.circle")
+                        Button("Sign Out") { telegram.signOut() }
+                    case .failed(let message):
+                        Text(message).foregroundStyle(.red)
+                    default:
+                        Text("Telegram login is stored in Keychain after MTProto authorization.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-                    Text(
-                        "If Settings is open when a stream begins, it will close automatically."
-                    )
-                    .font(
-                        .footnote
-                    )
-                    .foregroundStyle(
-                        .secondary
-                    )
+                Section("Google Drive") {
+                    switch googleDrive.state {
+                    case .signedOut:
+                        Button("Sign In to Google Drive") {
+                            googleDrive.signIn()
+                        }
+                        Text("A code will appear here. Open the verification link on another device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    case .waitingForApproval:
+                        Text("Code: \(googleDrive.userCode)")
+                            .font(.title2.monospaced())
+                        if let verificationURL = googleDrive.verificationURL {
+                            Text(verificationURL.absoluteString)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("Cancel Sign In") { googleDrive.signOut() }
+                    case .signedIn:
+                        Label("Google Drive connected", systemImage: "checkmark.circle")
+                        Button(driveIsLoading ? "Loading..." : "Refresh Drive Files") {
+                            refreshDriveFiles()
+                        }
+                        .disabled(driveIsLoading)
+
+                        ForEach(driveTracks) { track in
+                            Button {
+                                let source = GoogleDriveMediaSource(account: googleDrive)
+                                player.load(track: track, from: source)
+                                presentationMode.wrappedValue.dismiss()
+                            } label: {
+                                Label(track.title, systemImage: "music.note")
+                            }
+                        }
+                        Button("Sign Out") { googleDrive.signOut() }
+                    case .failed(let message):
+                        Text(message).foregroundStyle(.red)
+                        Button("Try Again") { googleDrive.signIn() }
+                    }
                 }
 
                 Section(
@@ -1341,6 +1521,23 @@ struct SettingsView: View {
                     }
                 }
             }
+            .task {
+                if case .signedIn = googleDrive.state {
+                    refreshDriveFiles()
+                }
+            }
+        }
+    }
+
+    private func refreshDriveFiles() {
+        driveIsLoading = true
+        Task {
+            do {
+                driveTracks = try await GoogleDriveMediaSource(account: googleDrive).tracks()
+            } catch {
+                driveTracks = []
+            }
+            driveIsLoading = false
         }
     }
 }
@@ -1422,7 +1619,7 @@ struct ValueStepper: View {
 #Preview {
 
     ContentView()
-        .environmentObject(
-            ReceiverStore()
-        )
+        .environmentObject(MediaPlayerStore())
+        .environmentObject(TelegramAccountStore())
+        .environmentObject(GoogleDriveAccountStore())
 }

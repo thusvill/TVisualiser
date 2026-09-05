@@ -6,7 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		04269455304B046800F06C43 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04269454304B046800F06C43 /* AppIntents.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		04269454304B046800F06C43 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		0496B8DD304A63C0005F81CA /* TVisualiser.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TVisualiser.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -23,16 +28,26 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				04269455304B046800F06C43 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		04269453304B046800F06C43 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				04269454304B046800F06C43 /* AppIntents.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		0496B8D4304A63C0005F81CA = {
 			isa = PBXGroup;
 			children = (
 				0496B8DF304A63C0005F81CA /* TVisualiser */,
+				04269453304B046800F06C43 /* Frameworks */,
 				0496B8DE304A63C0005F81CA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -185,7 +200,7 @@
 				SDKROOT = appletvos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				TVOS_DEPLOYMENT_TARGET = 26.1;
+				TVOS_DEPLOYMENT_TARGET = 15.1.1;
 			};
 			name = Debug;
 		};
@@ -241,7 +256,7 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = appletvos;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				TVOS_DEPLOYMENT_TARGET = 26.1;
+				TVOS_DEPLOYMENT_TARGET = 15.1.1;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -256,8 +271,6 @@
 				DEVELOPMENT_TEAM = 44DJWYP5M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = _raop._tcp;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TVisualiser receives AirPlay audio from devices on your local network.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -288,8 +301,6 @@
 				DEVELOPMENT_TEAM = 44DJWYP5M6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = _raop._tcp;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TVisualiser receives AirPlay audio from devices on your local network.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
