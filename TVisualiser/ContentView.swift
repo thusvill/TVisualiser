@@ -47,137 +47,76 @@ struct ContentView: View {
 
     var body: some View {
 
-        GeometryReader { geometry in
+    GeometryReader { geometry in
+        let width = geometry.size.width
+        let height = geometry.size.height
+        let artworkSize = min(width * 0.27, height * 0.34, 330)
+        let playerCardWidth = min(width * 0.48, 760)
 
-            let width = geometry.size.width
-            let height = geometry.size.height
-            let artworkSize = min(
-                width * 0.27,
-                height * 0.34,
-                330
-            )
-            let playerCardWidth = min(width * 0.48, 760)
+        ZStack {
+            VStack(spacing: 0) {
 
-            ZStack {
-
-                // ==================================================
-                // Fixed player composition
-                // ==================================================
-
-                VStack(spacing: 0) {
-
-                    HeaderView(
-                        showClock: showClock,
-                        onMedia: {
-                            presentedSheet = .mediaLibrary
-                        },
-                        onSettings: {
-                            presentedSheet = .settings
-                        }
-                    )
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: .top
-                    )
-
-                    Spacer(minLength: 0)
-
-                    VStack(spacing: 18) {
-
-                        AlbumArtView(
-                            artwork: receiver.artwork,
-                            side: artworkSize
-                        )
-
-                        MetadataView(
-                            title: receiver.trackTitle,
-                            artist: receiver.artist,
-                            album: receiver.album
-                        )
-                        .frame(
-                            maxWidth: 720
-                        )
-
-                        AudioVisualizerView(
-                            data: receiver.waveform,
-                            color: dynamicWaveformColor
-                                ? receiver.waveformColor
-                                : .black,
-                            sensitivity: waveformSensitivity,
-                            lineWidth: waveformLineWidth
-                        )
-                        .frame(
-                            width: min(width * 0.82, 1100),
-                            height: 72
-                        )
-                    }
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: min(height * 0.62, 440),
-                        alignment: .center
-                    )
-                    .padding(.top, 24)
-
-                    Spacer(minLength: 0)
-
-                    MediaControlCard(
-                        currentTime: receiver.currentTime,
-                        duration: receiver.duration,
-                        isPlaying: receiver.isPlaying,
-                        onBackward: {
-                            receiver.skipBackward()
-                        },
-                        onPlayPause: {
-                            receiver.togglePlayback()
-                        },
-                        onForward: {
-                            receiver.skipForward()
-                        },
-                        focusNamespace: focusNamespace
-                    )
-                    .frame(
-                        width: playerCardWidth
-                    )
-                    .padding(.bottom, 28)
-                }
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity
+                HeaderView(
+                    showClock: showClock,
+                    onMedia: { showingMediaLibrary = true },
+                    onSettings: { showingSettings = true }
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .focusSection()
+                Spacer(minLength: 0)
+
+                // Plain, non-focusable content — nothing here should
+                // ever hold focus or intercept the D-pad.
+                VStack(spacing: 18) {
+                    AlbumArtView(artwork: receiver.artwork, side: artworkSize)
+                    MetadataView(title: receiver.trackTitle, artist: receiver.artist, album: receiver.album)
+                        .frame(maxWidth: 720)
+                    AudioVisualizerView(
+                        data: receiver.waveform,
+                        color: dynamicWaveformColor ? receiver.waveformColor : .black,
+                        sensitivity: waveformSensitivity,
+                        lineWidth: waveformLineWidth
+                    )
+                    .frame(width: width, height: 72)
+                }
+                .frame(maxWidth: .infinity, maxHeight: min(height * 0.62, 440), alignment: .center)
+                .padding(.top, 24)
+
+                Spacer(minLength: 0)
+
+                MediaControlCard(
+                    currentTime: receiver.currentTime,
+                    duration: receiver.duration,
+                    isPlaying: receiver.isPlaying,
+                    onBackward: { receiver.skipBackward() },
+                    onPlayPause: { receiver.togglePlayback() },
+                    onForward: { receiver.skipForward() },
+                    focusNamespace: focusNamespace
+                )
+                .frame(width: playerCardWidth)
+                .padding(.bottom, 28)
             }
-            .background(background.ignoresSafeArea())
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
         }
-        .preferredColorScheme(.light)
-
-        // Remote Play/Pause button.
-        .onPlayPauseCommand {
-            receiver.togglePlayback()
-        }
-
-        .fullScreenCover(item: $presentedSheet) { sheet in
-            switch sheet {
-            case .settings:
-                SettingsView()
-                    .environmentObject(receiver)
-                    .environmentObject(ftp)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .mediaLibrary:
-                MediaLibraryView()
-                    .environmentObject(receiver)
-                    .environmentObject(ftp)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .focusSection()
+        .background(background.ignoresSafeArea())
     }
-
-    private enum PresentedSheet: Identifiable {
-        case settings
-        case mediaLibrary
-
-        var id: Self { self }
+    .preferredColorScheme(.light)
+    .onPlayPauseCommand {
+        receiver.togglePlayback()
     }
+    
+    .sheet(isPresented: $showingSettings) {
+    SettingsView()
+        .environmentObject(receiver)
+        .environmentObject(ftp)
+}
+.sheet(isPresented: $showingMediaLibrary) {
+    MediaLibraryView()
+        .environmentObject(receiver)
+        .environmentObject(ftp)
+}
+}
 }
 
 // ================================================================
@@ -210,67 +149,67 @@ private extension ContentView {
                 )
                 .resizable()
                 .scaledToFill()
-                .scaleEffect(1.25)
+                .scaleEffect(1.2)
                 .blur(
-                    radius: 80
+                    radius: 20
                 )
                 .saturation(1.15)
-                .opacity(0.40)
+                .opacity(1)
                 .ignoresSafeArea()
 
-                RadialGradient(
-                    colors: [
-                        receiver.waveformColor
-                            .opacity(0.34),
-
-                        receiver.waveformColor
-                            .opacity(0.18),
-
-                        Color.clear
-                    ],
-                    center: .center,
-                    startRadius: 80,
-                    endRadius: 800
-                )
-                .ignoresSafeArea()
+//                RadialGradient(
+//                    colors: [
+//                        receiver.waveformColor
+//                            .opacity(0.34),
+//
+//                        receiver.waveformColor
+//                            .opacity(0.18),
+//
+//                        Color.clear
+//                    ],
+//                    center: .center,
+//                    startRadius: 5,
+//                    endRadius: 50
+//                )
+//                .ignoresSafeArea()
             }
 
             // ------------------------------------------------------
             // Soft warm wash to keep the blur visible
             // ------------------------------------------------------
 
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.70),
-                    Color(white: 0.92).opacity(0.28),
-                    Color(white: 0.95).opacity(0.58)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+//            LinearGradient(
+//                colors: [
+//                    Color.white.opacity(0.00),
+//                    Color(white: 0.92).opacity(0.08),
+//                    Color(white: 0.95).opacity(0.08)
+//                ],
+//                startPoint: .top,
+//                endPoint: .bottom
+//            )
+//            .ignoresSafeArea()
 
             // ------------------------------------------------------
             // Subtle darkening to preserve contrast
             // ------------------------------------------------------
 
-            Color.black.opacity(0.06)
+            Color.black.opacity(0.08)
                 .ignoresSafeArea()
 
             // ------------------------------------------------------
             // Center highlight
             // ------------------------------------------------------
 
-            RadialGradient(
-                colors: [
-                    Color.white.opacity(0.25),
-                    Color.clear
-                ],
-                center: .center,
-                startRadius: 120,
-                endRadius: 700
-            )
-            .ignoresSafeArea()
+//            RadialGradient(
+//                colors: [
+//                    Color.white.opacity(0.25),
+//                    Color.clear
+//                ],
+//                center: .center,
+//                startRadius: 120,
+//                endRadius: 700
+//            )
+//            .ignoresSafeArea()
         }
     }
 
@@ -657,201 +596,50 @@ struct AudioVisualizerView: View {
     let sensitivity: Double
     let lineWidth: Double
 
-    /*
-     64 bars gives a good density on a TV display without
-     hammering SwiftUI with too many individual views.
-     */
-    private let barCount = 64
-
     var body: some View {
-
         GeometryReader { geometry in
-
-            let values = makeDisplayValues(
-                from: data,
-                count: barCount
-            )
-
-            HStack(
-                alignment: .center,
-                spacing: 5
-            ) {
-
-                ForEach(
-                    values.indices,
-                    id: \.self
-                ) { index in
-
-                    let normalized = values[index]
-
-                    let boosted = boostedLevel(
-                        normalized
+            WaveformBars(data: data, sensitivity: sensitivity)
+                .stroke(
+                    color.opacity(0.88),
+                    style: StrokeStyle(
+                        lineWidth: lineWidth,
+                        lineCap: .round,
+                        lineJoin: .round
                     )
-
-                    let height =
-                        max(
-                            4,
-                            geometry.size.height
-                                * boosted
-                        )
-
-                    Capsule()
-                        .fill(
-                            color.opacity(
-                                0.86
-                            )
-                        )
-                        .frame(
-                            width: 5,
-                            height: height
-                        )
-                        .animation(
-                            .easeOut(
-                                duration: 0.07
-                            ),
-                            value: height
-                        )
-                }
-            }
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .center
-            )
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
         }
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity
+        )
         .clipped()
     }
+}
 
-    // ------------------------------------------------------------
-    // Convert 96 source samples into 64 display bars.
-    // ------------------------------------------------------------
+private struct WaveformBars: Shape {
+    let data: [Float]
+    let sensitivity: Double
 
-    private func makeDisplayValues(
-        from source: [Float],
-        count: Int
-    ) -> [Float] {
+    func path(in rect: CGRect) -> Path {
+        let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
+        let step = rect.width / CGFloat(max(1, values.count))
+        let centerY = rect.midY
+        let usableHeight = rect.height * 0.46
+        var path = Path()
 
-        guard !source.isEmpty else {
-
-            return Array(
-                repeating: 0.025,
-                count: count
-            )
+        for index in values.indices {
+            let normalized = max(0.02, min(1, values[index] * Float(sensitivity)))
+            let shaped = CGFloat(pow(normalized, 0.72))
+            let barHeight = max(CGFloat(2), shaped * usableHeight)
+            let x = rect.minX + step * (CGFloat(index) + 0.5)
+            path.move(to: CGPoint(x: x, y: centerY - barHeight))
+            path.addLine(to: CGPoint(x: x, y: centerY + barHeight))
         }
-
-        /*
-         Average several adjacent samples into each bar.
-         */
-        var result = [Float]()
-        result.reserveCapacity(count)
-
-        let bucketSize =
-            Double(source.count)
-            / Double(count)
-
-        for index in 0..<count {
-
-            let start = Int(
-                Double(index)
-                    * bucketSize
-            )
-
-            let end = min(
-                source.count,
-                max(
-                    start + 1,
-                    Int(
-                        Double(index + 1)
-                            * bucketSize
-                    )
-                )
-            )
-
-            let bucket =
-                source[start..<end]
-
-            guard !bucket.isEmpty else {
-                result.append(0.025)
-                continue
-            }
-
-            /*
-             RMS-like calculation instead of a plain average.
-
-             This makes smaller transients much more visible.
-             */
-            var energy: Float = 0
-
-            for value in bucket {
-
-                let safe =
-                    max(
-                        0,
-                        min(
-                            1,
-                            value
-                        )
-                    )
-
-                energy += safe * safe
-            }
-
-            let rms = sqrt(
-                energy /
-                Float(bucket.count)
-            )
-
-            result.append(
-                rms.isFinite
-                    ? rms
-                    : 0
-            )
-        }
-
-        return result
-    }
-
-    // ------------------------------------------------------------
-    // Boost quiet audio.
-    // ------------------------------------------------------------
-
-    private func boostedLevel(
-        _ value: Float
-    ) -> CGFloat {
-
-        let v = max(
-            0,
-            min(
-                1,
-                value
-                    * Float(sensitivity)
-            )
-        )
-
-        /*
-         Power < 1 expands small values.
-
-         Example:
-
-         0.05 -> visually much larger
-         0.50 -> still controlled
-         1.00 -> maximum
-         */
-        let shaped =
-            pow(
-                v,
-                0.55
-            )
-
-        return CGFloat(
-            max(
-                0.035,
-                min(
-                    1,
-                    shaped
-                )
-            )
-        )
+        return path
     }
 }
 
@@ -1005,6 +793,17 @@ struct MediaControlCard: View {
                     equals: .forward
                 )
             }
+            .focusSection()
+            .onMoveCommand { direction in
+                switch direction {
+                case .left:
+                    moveFocusLeft()
+                case .right:
+                    moveFocusRight()
+                default:
+                    break
+                }
+            }
 
             // ======================================================
             // PROGRESS BAR
@@ -1091,6 +890,9 @@ struct MediaControlCard: View {
             x: 0,
             y: 14
         )
+        .onAppear {
+            focusedControl = .playPause
+        }
     }
 
     private var progress: CGFloat {
@@ -1133,6 +935,28 @@ struct MediaControlCard: View {
             minutes,
             seconds
         )
+    }
+
+    private func moveFocusLeft() {
+        switch focusedControl {
+        case .forward:
+            focusedControl = .playPause
+        case .playPause, nil:
+            focusedControl = .backward
+        case .backward:
+            onBackward()
+        }
+    }
+
+    private func moveFocusRight() {
+        switch focusedControl {
+        case .backward:
+            focusedControl = .playPause
+        case .playPause, nil:
+            focusedControl = .forward
+        case .forward:
+            onForward()
+        }
     }
 }
 
@@ -1278,57 +1102,54 @@ struct MediaLibraryView: View {
     @State private var errorMessage = ""
 
     var body: some View {
-        NavigationView {
-            List {
-                Section("FTP") {
-                    if !ftp.isConfigured {
-                        Text("Configure the local FTP server in Settings.")
-                        Button("Open Settings") {
-                            presentationMode.wrappedValue.dismiss()
-                        }
-                    } else {
-                        Button(isLoading ? "Loading files..." : "Refresh files") { refresh() }
-                            .disabled(isLoading)
 
-                        if tracks.isEmpty && !isLoading {
-                            Text("No audio or video files available to this app.")
-                                .foregroundStyle(.secondary)
-                        }
-
-                        ForEach(tracks) { track in
-                            Button {
-                                let source = FTPMediaSource(account: ftp)
-                                player.load(track: track, from: source)
-                                presentationMode.wrappedValue.dismiss()
-                            } label: {
-                                Label(track.title, systemImage: "play.circle")
-                            }
-                            .buttonStyle(TVButtonStyle())
-                        }
-                    }
-                }
-
-                if !errorMessage.isEmpty {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red)
-                    }
-                }
-            }
-            .navigationTitle("Media Library")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+    NavigationView {
+        List {
+            Section("FTP") {
+                if !ftp.isConfigured {
+                    Text("Configure the local FTP server in Settings.")
+                    Button("Open Settings") {
                         presentationMode.wrappedValue.dismiss()
                     }
+                } else {
+                    Button(isLoading ? "Loading files..." : "Refresh files") { refresh() }
+                        .disabled(isLoading)
+
+                    if tracks.isEmpty && !isLoading {
+                        Text("No audio or video files available to this app.")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(tracks) { track in
+                        Button {
+                            let source = FTPMediaSource(account: ftp)
+                            player.load(track: track, from: source)
+                            presentationMode.wrappedValue.dismiss()
+                        } label: {
+                            Label(track.title, systemImage: "play.circle")
+                        }
+                        .buttonStyle(TVButtonStyle())
+                    }
                 }
             }
-            .task {
-                if ftp.isConfigured {
-                    refresh()
+
+            if !errorMessage.isEmpty {
+                Section {
+                    Text(errorMessage).foregroundStyle(.red)
                 }
             }
         }
+        .navigationTitle("Media Library")
+        .task {
+            if ftp.isConfigured {
+                refresh()
+            }
+        }
     }
+    .onExitCommand {
+        presentationMode.wrappedValue.dismiss()
+    }
+}
 
     private func refresh() {
         isLoading = true
@@ -1373,110 +1194,47 @@ struct SettingsView: View {
 
     var body: some View {
 
-        NavigationView {
+    NavigationView {
+        Form {
 
-            Form {
-
-                Section {
-
-                    Text(
-                        "TVisualiser"
-                    )
-                    .font(
-                        .title2.bold()
-                    )
-
-                    Text(
-                        "Choose a source to begin playback."
-                    )
-                    .foregroundStyle(
-                        .secondary
-                    )
-                }
-
-                Section(
-                    "Display"
-                ) {
-
-                    Toggle(
-                        "Show clock",
-                        isOn: $showClock
-                    )
-                }
-
-                Section("FTP") {
-                    TextField("Server address", text: $ftp.host)
-                    TextField("Port", value: $ftp.port, format: .number)
-                    TextField("Username", text: $ftp.username)
-                    SecureField("Password", text: $ftp.password)
-                    TextField("Media folder", text: $ftp.path)
-                    Button("Save FTP Settings") { ftp.save() }
-                    Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section(
-                    "Waveform"
-                ) {
-
-                    Toggle(
-                        "Dynamic color from cover art",
-                        isOn: $dynamicWaveformColor
-                    )
-
-                    ValueStepper(
-                        label: "Line width",
-                        value: $waveformLineWidth,
-                        range: 1...6,
-                        step: 0.5
-                    )
-
-                    ValueStepper(
-                        label: "Sensitivity",
-                        value: $waveformSensitivity,
-                        range: 0.5...2.0,
-                        step: 0.1
-                    )
-                }
-
-                Section(
-                    "Remote Controls"
-                ) {
-
-                    Text(
-                        "Play/Pause button — toggle playback"
-                    )
-
-                    Text(
-                        "Menu button — close settings / go back"
-                    )
-                }
+            Section {
+                Text("TVisualiser")
+                    .font(.title2.bold())
+                Text("Choose a source to begin playback.")
+                    .foregroundStyle(.secondary)
             }
-            .navigationTitle(
-                "Settings"
-            )
-            .toolbar {
 
-                ToolbarItem(
-                    placement:
-                        .confirmationAction
-                ) {
-
-                    Button(
-                        "Done"
-                    ) {
-
-                        presentationMode
-                            .wrappedValue
-                            .dismiss()
-                    }
-                }
+            Section("Display") {
+                Toggle("Show clock", isOn: $showClock)
             }
-            .task {
+
+            Section("FTP") {
+                TextField("Server address", text: $ftp.host)
+                TextField("Port", value: $ftp.port, format: .number)
+                TextField("Username", text: $ftp.username)
+                SecureField("Password", text: $ftp.password)
+                TextField("Media folder", text: $ftp.path)
+                Button("Save FTP Settings") { ftp.save() }
+                Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Waveform") {
+                Toggle("Dynamic color from cover art", isOn: $dynamicWaveformColor)
+                ValueStepper(label: "Line width", value: $waveformLineWidth, range: 1...6, step: 0.5)
+                ValueStepper(label: "Sensitivity", value: $waveformSensitivity, range: 0.5...2.0, step: 0.1)
             }
         }
+        .navigationTitle("Settings")
+        .onDisappear {
+            ftp.save()
+        }
     }
+    .onExitCommand {
+        presentationMode.wrappedValue.dismiss()
+    }
+}
 }
 
 // ================================================================
@@ -1495,57 +1253,45 @@ struct ValueStepper: View {
 
     var body: some View {
 
-        HStack {
-
-            Text(
-                "\(label): \(String(format: "%.1f", value))"
-            )
-
+        HStack(spacing: 18) {
+            Text(label)
             Spacer()
 
-            HStack(
-                spacing: 20
-            ) {
-
-                Button {
-
-                    value =
-                        max(
-                            range.lowerBound,
-                            value - step
-                        )
-
-                } label: {
-
-                    Image(
-                        systemName:
-                            "minus.circle"
-                    )
-                }
-                .disabled(
-                    value <= range.lowerBound
-                )
-
-                Button {
-
-                    value =
-                        min(
-                            range.upperBound,
-                            value + step
-                        )
-
-                } label: {
-
-                    Image(
-                        systemName:
-                            "plus.circle"
-                    )
-                }
-                .disabled(
-                    value >= range.upperBound
-                )
+            Button(action: decrease) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
             }
+            .buttonStyle(TVButtonStyle())
+            .disabled(value <= range.lowerBound)
+
+            Text(String(format: "%.1f", value))
+                .font(.system(.body, design: .rounded).monospacedDigit())
+                .frame(width: 54)
+
+            Button(action: increase) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+            }
+            .buttonStyle(TVButtonStyle())
+            .disabled(value >= range.upperBound)
         }
+        .padding(.vertical, 8)
+    }
+
+    private func decrease() {
+        value =
+            max(
+                range.lowerBound,
+                value - step
+            )
+    }
+
+    private func increase() {
+        value =
+            min(
+                range.upperBound,
+                value + step
+            )
     }
 }
 
@@ -1553,9 +1299,10 @@ struct ValueStepper: View {
 // MARK: - Preview
 // ================================================================
 
-#Preview {
-
-    ContentView()
-        .environmentObject(MediaPlayerStore())
-        .environmentObject(FTPAccountStore())
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environmentObject(MediaPlayerStore())
+            .environmentObject(FTPAccountStore())
+    }
 }
