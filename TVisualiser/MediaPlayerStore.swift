@@ -58,9 +58,11 @@ final class MediaPlayerStore: ObservableObject {
                 artist = preparedTrack.artist
                 album = preparedTrack.album
                 duration = playback.duration
+                waveform = playback.waveformSamples(count: waveform.count)
                 currentTime = 0
-                artwork = preparedTrack.artworkData.flatMap(UIImage.init(data:))
-                waveformColor = .black
+                let artworkData = preparedTrack.artworkData ?? playback.artworkData()
+                artwork = artworkData.flatMap(UIImage.init(data:))
+                waveformColor = artwork.flatMap(Self.averageColor) ?? .black
                 isPlaying = false
             } catch {
                 trackTitle = error.localizedDescription
@@ -101,6 +103,24 @@ final class MediaPlayerStore: ObservableObject {
             currentTime = duration > 0 ? min(duration, actualTime) : actualTime
         }
     }
+
+    private static func averageColor(of image: UIImage) -> Color? {
+        guard let input = CIImage(image: image) else { return nil }
+        let extent = input.extent
+        let filter = CIFilter(name: "CIAreaAverage", parameters: [
+            kCIInputImageKey: input,
+            kCIInputExtentKey: CIVector(cgRect: extent)
+        ])
+        guard let output = filter?.outputImage,
+              let cgImage = CIContext().createCGImage(output, from: CGRect(x: 0, y: 0, width: 1, height: 1)),
+              let pixel = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(pixel) else { return nil }
+        return Color(
+            red: Double(bytes[0]) / 255,
+            green: Double(bytes[1]) / 255,
+            blue: Double(bytes[2]) / 255
+        )
+    }
 }
 
 private final class AudioPlaybackEngine {
@@ -118,9 +138,61 @@ private final class AudioPlaybackEngine {
     func load(url: URL) throws {
         player?.stop()
         let nextPlayer = try AVAudioPlayer(contentsOf: url)
+        nextPlayer.isMeteringEnabled = true
         nextPlayer.prepareToPlay()
         player = nextPlayer
         duration = nextPlayer.duration
+    }
+
+    func artworkData() -> Data? {
+        guard let url = player?.url else { return nil }
+        let asset = AVAsset(url: url)
+        return asset.commonMetadata
+            .first(where: { $0.commonKey == .commonKeyArtwork })?
+            .dataValue
+    }
+
+    func waveformSamples(count: Int) -> [Float] {
+        guard let url = player?.url, count > 0,
+              let file = try? AVAudioFile(forReading: url) else {
+            return Array(repeating: 0.04, count: count)
+        }
+
+        let totalFrames = Int(file.length)
+        guard totalFrames > 0,
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: 4096
+              ) else {
+            return Array(repeating: 0.04, count: count)
+        }
+
+        var peaks = Array(repeating: Float(0), count: count)
+        var processedFrames = 0
+        while processedFrames < totalFrames {
+            do {
+                try file.read(into: buffer)
+            } catch {
+                break
+            }
+            let frameCount = Int(buffer.frameLength)
+            guard frameCount > 0, let channels = buffer.floatChannelData else { break }
+            for frame in 0..<frameCount {
+                let index = min(count - 1, (processedFrames + frame) * count / totalFrames)
+                var peak: Float = 0
+                for channel in 0..<Int(buffer.format.channelCount) {
+                    peak = max(peak, abs(channels[channel][frame]))
+                }
+                peaks[index] = max(peaks[index], peak)
+            }
+            processedFrames += frameCount
+        }
+
+        let maximum = peaks.max() ?? 1
+        return peaks.map { value in
+            guard maximum > 0 else { return Float(0.04) }
+            return max(0.04, min(1, value / maximum))
+        }
     }
 
     func play() {

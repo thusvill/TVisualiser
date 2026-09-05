@@ -647,201 +647,55 @@ struct AudioVisualizerView: View {
     let sensitivity: Double
     let lineWidth: Double
 
-    /*
-     64 bars gives a good density on a TV display without
-     hammering SwiftUI with too many individual views.
-     */
-    private let barCount = 64
-
     var body: some View {
-
         GeometryReader { geometry in
-
-            let values = makeDisplayValues(
-                from: data,
-                count: barCount
-            )
-
-            HStack(
-                alignment: .center,
-                spacing: 5
-            ) {
-
-                ForEach(
-                    values.indices,
-                    id: \.self
-                ) { index in
-
-                    let normalized = values[index]
-
-                    let boosted = boostedLevel(
-                        normalized
+            WaveformLine(data: data, sensitivity: sensitivity)
+                .stroke(
+                    color.opacity(0.88),
+                    style: StrokeStyle(
+                        lineWidth: lineWidth,
+                        lineCap: .round,
+                        lineJoin: .round
                     )
-
-                    let height =
-                        max(
-                            4,
-                            geometry.size.height
-                                * boosted
-                        )
-
-                    Capsule()
-                        .fill(
-                            color.opacity(
-                                0.86
-                            )
-                        )
-                        .frame(
-                            width: 5,
-                            height: height
-                        )
-                        .animation(
-                            .easeOut(
-                                duration: 0.07
-                            ),
-                            value: height
-                        )
-                }
-            }
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .center
-            )
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
+                .animation(
+                    .easeOut(duration: 0.18),
+                    value: data
+                )
         }
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity
+        )
         .clipped()
     }
+}
 
-    // ------------------------------------------------------------
-    // Convert 96 source samples into 64 display bars.
-    // ------------------------------------------------------------
+private struct WaveformLine: Shape {
+    let data: [Float]
+    let sensitivity: Double
 
-    private func makeDisplayValues(
-        from source: [Float],
-        count: Int
-    ) -> [Float] {
+    func path(in rect: CGRect) -> Path {
+        let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
+        let step = rect.width / CGFloat(max(1, values.count - 1))
+        var path = Path()
 
-        guard !source.isEmpty else {
-
-            return Array(
-                repeating: 0.025,
-                count: count
-            )
-        }
-
-        /*
-         Average several adjacent samples into each bar.
-         */
-        var result = [Float]()
-        result.reserveCapacity(count)
-
-        let bucketSize =
-            Double(source.count)
-            / Double(count)
-
-        for index in 0..<count {
-
-            let start = Int(
-                Double(index)
-                    * bucketSize
-            )
-
-            let end = min(
-                source.count,
-                max(
-                    start + 1,
-                    Int(
-                        Double(index + 1)
-                            * bucketSize
-                    )
-                )
-            )
-
-            let bucket =
-                source[start..<end]
-
-            guard !bucket.isEmpty else {
-                result.append(0.025)
-                continue
+        for index in values.indices {
+            let normalized = max(0.02, min(1, values[index] * Float(sensitivity)))
+            let shaped = CGFloat(pow(normalized, 0.72))
+            let y = rect.midY - (shaped * rect.height * 0.46)
+            let point = CGPoint(x: CGFloat(index) * step, y: y)
+            if index == values.startIndex {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
             }
-
-            /*
-             RMS-like calculation instead of a plain average.
-
-             This makes smaller transients much more visible.
-             */
-            var energy: Float = 0
-
-            for value in bucket {
-
-                let safe =
-                    max(
-                        0,
-                        min(
-                            1,
-                            value
-                        )
-                    )
-
-                energy += safe * safe
-            }
-
-            let rms = sqrt(
-                energy /
-                Float(bucket.count)
-            )
-
-            result.append(
-                rms.isFinite
-                    ? rms
-                    : 0
-            )
         }
-
-        return result
-    }
-
-    // ------------------------------------------------------------
-    // Boost quiet audio.
-    // ------------------------------------------------------------
-
-    private func boostedLevel(
-        _ value: Float
-    ) -> CGFloat {
-
-        let v = max(
-            0,
-            min(
-                1,
-                value
-                    * Float(sensitivity)
-            )
-        )
-
-        /*
-         Power < 1 expands small values.
-
-         Example:
-
-         0.05 -> visually much larger
-         0.50 -> still controlled
-         1.00 -> maximum
-         */
-        let shaped =
-            pow(
-                v,
-                0.55
-            )
-
-        return CGFloat(
-            max(
-                0.035,
-                min(
-                    1,
-                    shaped
-                )
-            )
-        )
+        return path
     }
 }
 
@@ -1464,6 +1318,9 @@ struct SettingsView: View {
                 }
             }
             .task {
+            }
+            .onDisappear {
+                ftp.save()
             }
         }
     }
