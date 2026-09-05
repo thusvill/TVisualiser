@@ -48,126 +48,68 @@ struct ContentView: View {
 
     var body: some View {
 
-        GeometryReader { geometry in
+    GeometryReader { geometry in
+        let width = geometry.size.width
+        let height = geometry.size.height
+        let artworkSize = min(width * 0.27, height * 0.34, 330)
+        let playerCardWidth = min(width * 0.48, 760)
 
-            let width = geometry.size.width
-            let height = geometry.size.height
-            let artworkSize = min(
-                width * 0.27,
-                height * 0.34,
-                330
-            )
-            let playerCardWidth = min(width * 0.48, 760)
+        ZStack {
+            VStack(spacing: 0) {
 
-            ZStack {
-
-                // ==================================================
-                // Fixed player composition
-                // ==================================================
-
-                VStack(spacing: 0) {
-
-                    HeaderView(
-                        showClock: showClock,
-                        onMedia: {
-                            showingMediaLibrary = true
-                        },
-                        onSettings: {
-                            showingSettings = true
-                        }
-                    )
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: .top
-                    )
-
-                    Spacer(minLength: 0)
-
-                    VStack(spacing: 18) {
-
-                        AlbumArtView(
-                            artwork: receiver.artwork,
-                            side: artworkSize
-                        )
-
-                        MetadataView(
-                            title: receiver.trackTitle,
-                            artist: receiver.artist,
-                            album: receiver.album
-                        )
-                        .frame(
-                            maxWidth: 720
-                        )
-
-                        AudioVisualizerView(
-                            data: receiver.waveform,
-                            color: dynamicWaveformColor
-                                ? receiver.waveformColor
-                                : .black,
-                            sensitivity: waveformSensitivity,
-                            lineWidth: waveformLineWidth
-                        )
-                        .frame(
-                            width: min(width * 0.82, 1100),
-                            height: 72
-                        )
-                    }
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: min(height * 0.62, 440),
-                        alignment: .center
-                    )
-                    .padding(.top, 24)
-
-                    Spacer(minLength: 0)
-
-                    MediaControlCard(
-                        currentTime: receiver.currentTime,
-                        duration: receiver.duration,
-                        isPlaying: receiver.isPlaying,
-                        onBackward: {
-                            receiver.skipBackward()
-                        },
-                        onPlayPause: {
-                            receiver.togglePlayback()
-                        },
-                        onForward: {
-                            receiver.skipForward()
-                        },
-                        focusNamespace: focusNamespace
-                    )
-                    .frame(
-                        width: playerCardWidth
-                    )
-                    .padding(.bottom, 28)
-                }
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity
+                HeaderView(
+                    showClock: showClock,
+                    onMedia: { showingMediaLibrary = true },
+                    onSettings: { showingSettings = true }
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .focusSection()
+                Spacer(minLength: 0)
+
+                // Plain, non-focusable content — nothing here should
+                // ever hold focus or intercept the D-pad.
+                VStack(spacing: 18) {
+                    AlbumArtView(artwork: receiver.artwork, side: artworkSize)
+                    MetadataView(title: receiver.trackTitle, artist: receiver.artist, album: receiver.album)
+                        .frame(maxWidth: 720)
+                    AudioVisualizerView(
+                        data: receiver.waveform,
+                        color: dynamicWaveformColor ? receiver.waveformColor : .black,
+                        sensitivity: waveformSensitivity,
+                        lineWidth: waveformLineWidth
+                    )
+                    .frame(width: width, height: 72)
+                }
+                .frame(maxWidth: .infinity, maxHeight: min(height * 0.62, 440), alignment: .center)
+                .padding(.top, 24)
+
+                Spacer(minLength: 0)
+
+                MediaControlCard(
+                    currentTime: receiver.currentTime,
+                    duration: receiver.duration,
+                    isPlaying: receiver.isPlaying,
+                    onBackward: { receiver.skipBackward() },
+                    onPlayPause: { receiver.togglePlayback() },
+                    onForward: { receiver.skipForward() },
+                    focusNamespace: focusNamespace
+                )
+                .frame(width: playerCardWidth)
+                .padding(.bottom, 28)
             }
-            .background(background.ignoresSafeArea())
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
         }
-        .preferredColorScheme(.light)
-
-        // Remote Play/Pause button.
-        .onPlayPauseCommand {
-            receiver.togglePlayback()
-        }
-
-        .sheet(
-            isPresented: $showingSettings
-        ) {
-            SettingsView()
-        }
-        .sheet(
-            isPresented: $showingMediaLibrary
-        ) {
-            MediaLibraryView()
-        }
-        .focusSection()
+        .background(background.ignoresSafeArea())
     }
+    .preferredColorScheme(.light)
+    .onPlayPauseCommand {
+        receiver.togglePlayback()
+    }
+    // NOTE: no ContentView-level onMoveCommand at all.
+    .sheet(isPresented: $showingSettings) { SettingsView() }
+    .sheet(isPresented: $showingMediaLibrary) { MediaLibraryView() }
+}
 }
 
 // ================================================================
@@ -649,7 +591,7 @@ struct AudioVisualizerView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            WaveformLine(data: data, sensitivity: sensitivity)
+            WaveformBars(data: data, sensitivity: sensitivity)
                 .stroke(
                     color.opacity(0.88),
                     style: StrokeStyle(
@@ -662,10 +604,6 @@ struct AudioVisualizerView: View {
                     width: geometry.size.width,
                     height: geometry.size.height
                 )
-                .animation(
-                    .easeOut(duration: 0.18),
-                    value: data
-                )
         }
         .frame(
             maxWidth: .infinity,
@@ -675,25 +613,24 @@ struct AudioVisualizerView: View {
     }
 }
 
-private struct WaveformLine: Shape {
+private struct WaveformBars: Shape {
     let data: [Float]
     let sensitivity: Double
 
     func path(in rect: CGRect) -> Path {
         let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
-        let step = rect.width / CGFloat(max(1, values.count - 1))
+        let step = rect.width / CGFloat(max(1, values.count))
+        let centerY = rect.midY
+        let usableHeight = rect.height * 0.46
         var path = Path()
 
         for index in values.indices {
             let normalized = max(0.02, min(1, values[index] * Float(sensitivity)))
             let shaped = CGFloat(pow(normalized, 0.72))
-            let y = rect.midY - (shaped * rect.height * 0.46)
-            let point = CGPoint(x: CGFloat(index) * step, y: y)
-            if index == values.startIndex {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
+            let barHeight = max(CGFloat(2), shaped * usableHeight)
+            let x = rect.minX + step * (CGFloat(index) + 0.5)
+            path.move(to: CGPoint(x: x, y: centerY - barHeight))
+            path.addLine(to: CGPoint(x: x, y: centerY + barHeight))
         }
         return path
     }
@@ -849,6 +786,17 @@ struct MediaControlCard: View {
                     equals: .forward
                 )
             }
+            .focusSection()
+            .onMoveCommand { direction in
+                switch direction {
+                case .left:
+                    moveFocusLeft()
+                case .right:
+                    moveFocusRight()
+                default:
+                    break
+                }
+            }
 
             // ======================================================
             // PROGRESS BAR
@@ -935,6 +883,9 @@ struct MediaControlCard: View {
             x: 0,
             y: 14
         )
+        .onAppear {
+            focusedControl = .playPause
+        }
     }
 
     private var progress: CGFloat {
@@ -977,6 +928,28 @@ struct MediaControlCard: View {
             minutes,
             seconds
         )
+    }
+
+    private func moveFocusLeft() {
+        switch focusedControl {
+        case .forward:
+            focusedControl = .playPause
+        case .playPause, nil:
+            focusedControl = .backward
+        case .backward:
+            onBackward()
+        }
+    }
+
+    private func moveFocusRight() {
+        switch focusedControl {
+        case .backward:
+            focusedControl = .playPause
+        case .playPause, nil:
+            focusedControl = .forward
+        case .forward:
+            onForward()
+        }
     }
 }
 
@@ -1122,7 +1095,13 @@ struct MediaLibraryView: View {
     @State private var errorMessage = ""
 
     var body: some View {
-        NavigationView {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Media Library")
+                .font(.largeTitle.bold())
+                .padding(.horizontal, 64)
+                .padding(.top, 44)
+                .padding(.bottom, 18)
+
             List {
                 Section("FTP") {
                     if !ftp.isConfigured {
@@ -1158,19 +1137,14 @@ struct MediaLibraryView: View {
                     }
                 }
             }
-            .navigationTitle("Media Library")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
             .task {
                 if ftp.isConfigured {
                     refresh()
                 }
             }
+        }
+        .onExitCommand {
+            presentationMode.wrappedValue.dismiss()
         }
     }
 
@@ -1217,7 +1191,12 @@ struct SettingsView: View {
 
     var body: some View {
 
-        NavigationView {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Settings")
+                .font(.largeTitle.bold())
+                .padding(.horizontal, 64)
+                .padding(.top, 44)
+                .padding(.bottom, 18)
 
             Form {
 
@@ -1283,45 +1262,17 @@ struct SettingsView: View {
                         step: 0.1
                     )
                 }
-
-                Section(
-                    "Remote Controls"
-                ) {
-
-                    Text(
-                        "Play/Pause button — toggle playback"
-                    )
-
-                    Text(
-                        "Menu button — close settings / go back"
-                    )
-                }
-            }
-            .navigationTitle(
-                "Settings"
-            )
-            .toolbar {
-
-                ToolbarItem(
-                    placement:
-                        .confirmationAction
-                ) {
-
-                    Button(
-                        "Done"
-                    ) {
-
-                        presentationMode
-                            .wrappedValue
-                            .dismiss()
-                    }
-                }
             }
             .task {
             }
             .onDisappear {
                 ftp.save()
             }
+        }
+        .onExitCommand {
+            presentationMode
+                .wrappedValue
+                .dismiss()
         }
     }
 }
@@ -1342,57 +1293,45 @@ struct ValueStepper: View {
 
     var body: some View {
 
-        HStack {
-
-            Text(
-                "\(label): \(String(format: "%.1f", value))"
-            )
-
+        HStack(spacing: 18) {
+            Text(label)
             Spacer()
 
-            HStack(
-                spacing: 20
-            ) {
-
-                Button {
-
-                    value =
-                        max(
-                            range.lowerBound,
-                            value - step
-                        )
-
-                } label: {
-
-                    Image(
-                        systemName:
-                            "minus.circle"
-                    )
-                }
-                .disabled(
-                    value <= range.lowerBound
-                )
-
-                Button {
-
-                    value =
-                        min(
-                            range.upperBound,
-                            value + step
-                        )
-
-                } label: {
-
-                    Image(
-                        systemName:
-                            "plus.circle"
-                    )
-                }
-                .disabled(
-                    value >= range.upperBound
-                )
+            Button(action: decrease) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
             }
+            .buttonStyle(TVButtonStyle())
+            .disabled(value <= range.lowerBound)
+
+            Text(String(format: "%.1f", value))
+                .font(.system(.body, design: .rounded).monospacedDigit())
+                .frame(width: 54)
+
+            Button(action: increase) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+            }
+            .buttonStyle(TVButtonStyle())
+            .disabled(value >= range.upperBound)
         }
+        .padding(.vertical, 8)
+    }
+
+    private func decrease() {
+        value =
+            max(
+                range.lowerBound,
+                value - step
+            )
+    }
+
+    private func increase() {
+        value =
+            min(
+                range.upperBound,
+                value + step
+            )
     }
 }
 
@@ -1400,9 +1339,10 @@ struct ValueStepper: View {
 // MARK: - Preview
 // ================================================================
 
-#Preview {
-
-    ContentView()
-        .environmentObject(MediaPlayerStore())
-        .environmentObject(FTPAccountStore())
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environmentObject(MediaPlayerStore())
+            .environmentObject(FTPAccountStore())
+    }
 }

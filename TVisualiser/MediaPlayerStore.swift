@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Combine
 import CoreImage
 import Foundation
@@ -18,11 +19,13 @@ final class MediaPlayerStore: ObservableObject {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var activeSourceID: String?
 
+    nonisolated private static let waveformSampleCount = 96
+
     private let playback = AudioPlaybackEngine()
     private var timer: Timer?
 
     func start() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updatePlaybackState()
             }
@@ -36,7 +39,7 @@ final class MediaPlayerStore: ObservableObject {
         isPlaying = false
         currentTime = 0
         duration = 0
-        waveform = Array(repeating: 0, count: waveform.count)
+        waveform = Self.silentWaveform()
     }
 
     func select(source: any MediaSource) {
@@ -58,7 +61,7 @@ final class MediaPlayerStore: ObservableObject {
                 artist = preparedTrack.artist
                 album = preparedTrack.album
                 duration = playback.duration
-                waveform = playback.waveformSamples(count: waveform.count)
+                waveform = Self.silentWaveform()
                 currentTime = 0
                 let artworkData = preparedTrack.artworkData ?? playback.artworkData()
                 artwork = artworkData.flatMap(UIImage.init(data:))
@@ -78,7 +81,10 @@ final class MediaPlayerStore: ObservableObject {
         } else {
             playback.play()
         }
-        isPlaying.toggle()
+        isPlaying = playback.isPlaying
+        if !isPlaying {
+            waveform = Self.silentWaveform()
+        }
     }
 
     func skipBackward() {
@@ -97,7 +103,13 @@ final class MediaPlayerStore: ObservableObject {
     }
 
     private func updatePlaybackState() {
-        guard isPlaying else { return }
+        guard isPlaying else {
+            if waveform.contains(where: { $0 != 0 }) {
+                waveform = Self.silentWaveform()
+            }
+            return
+        }
+        waveform = playback.spectrum()
         let actualTime = playback.currentTime()
         if actualTime.isFinite && actualTime > 0 {
             currentTime = duration > 0 ? min(duration, actualTime) : actualTime
@@ -121,104 +133,319 @@ final class MediaPlayerStore: ObservableObject {
             blue: Double(bytes[2]) / 255
         )
     }
+
+    private static func silentWaveform() -> [Float] {
+        Array(repeating: 0, count: waveformSampleCount)
+    }
 }
 
 private final class AudioPlaybackEngine {
-    private var player: AVAudioPlayer?
+    private let engine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+    private let spectrumAnalyzer = LiveSpectrumAnalyzer(binCount: 96)
+    private var audioFile: AVAudioFile?
+    private var playbackStartFrame: AVAudioFramePosition = 0
+    private var pausedFrame: AVAudioFramePosition = 0
     private(set) var isPlaying = false
     private(set) var duration: TimeInterval = 0
-    var hasLoadedFile: Bool { player != nil }
+    var hasLoadedFile: Bool { audioFile != nil }
 
     init() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback, options: [])
         try? session.setActive(true)
+        engine.attach(playerNode)
     }
 
     func load(url: URL) throws {
-        player?.stop()
-        let nextPlayer = try AVAudioPlayer(contentsOf: url)
-        nextPlayer.isMeteringEnabled = true
-        nextPlayer.prepareToPlay()
-        player = nextPlayer
-        duration = nextPlayer.duration
+        stop()
+
+        let file = try AVAudioFile(forReading: url)
+        audioFile = file
+        duration = Double(file.length) / file.processingFormat.sampleRate
+        pausedFrame = 0
+        playbackStartFrame = 0
+        spectrumAnalyzer.reset()
+
+        engine.disconnectNodeOutput(playerNode)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: file.processingFormat)
+        installSpectrumTap()
+        engine.prepare()
     }
 
     func artworkData() -> Data? {
-        guard let url = player?.url else { return nil }
+        guard let url = audioFile?.url else { return nil }
         let asset = AVAsset(url: url)
         return asset.commonMetadata
             .first(where: { $0.commonKey == .commonKeyArtwork })?
             .dataValue
     }
 
-    func waveformSamples(count: Int) -> [Float] {
-        guard let url = player?.url, count > 0,
-              let file = try? AVAudioFile(forReading: url) else {
-            return Array(repeating: 0.04, count: count)
-        }
-
-        let totalFrames = Int(file.length)
-        guard totalFrames > 0,
-              let buffer = AVAudioPCMBuffer(
-                pcmFormat: file.processingFormat,
-                frameCapacity: 4096
-              ) else {
-            return Array(repeating: 0.04, count: count)
-        }
-
-        var peaks = Array(repeating: Float(0), count: count)
-        var processedFrames = 0
-        while processedFrames < totalFrames {
-            do {
-                try file.read(into: buffer)
-            } catch {
-                break
-            }
-            let frameCount = Int(buffer.frameLength)
-            guard frameCount > 0, let channels = buffer.floatChannelData else { break }
-            for frame in 0..<frameCount {
-                let index = min(count - 1, (processedFrames + frame) * count / totalFrames)
-                var peak: Float = 0
-                for channel in 0..<Int(buffer.format.channelCount) {
-                    peak = max(peak, abs(channels[channel][frame]))
-                }
-                peaks[index] = max(peaks[index], peak)
-            }
-            processedFrames += frameCount
-        }
-
-        let maximum = peaks.max() ?? 1
-        return peaks.map { value in
-            guard maximum > 0 else { return Float(0.04) }
-            return max(0.04, min(1, value / maximum))
-        }
+    func spectrum() -> [Float] {
+        guard isPlaying else { return spectrumAnalyzer.silentSnapshot() }
+        return spectrumAnalyzer.snapshot()
     }
 
     func play() {
-        guard let player else { return }
-        player.play()
-        isPlaying = player.isPlaying
+        guard audioFile != nil else { return }
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                isPlaying = false
+                return
+            }
+        }
+        guard schedulePlayback(from: pausedFrame) else { return }
+        playerNode.play()
+        isPlaying = true
     }
 
     func pause() {
-        player?.pause()
+        pausedFrame = currentFrame()
+        playerNode.pause()
         isPlaying = false
+        spectrumAnalyzer.reset()
     }
 
     func stop() {
-        player?.stop()
-        player = nil
+        playerNode.stop()
+        if engine.isRunning {
+            engine.stop()
+        }
+        engine.mainMixerNode.removeTap(onBus: 0)
+        audioFile = nil
         duration = 0
+        playbackStartFrame = 0
+        pausedFrame = 0
         isPlaying = false
+        spectrumAnalyzer.reset()
     }
 
     func currentTime() -> TimeInterval {
-        player?.currentTime ?? 0
+        guard let file = audioFile else { return 0 }
+        return Double(currentFrame()) / file.processingFormat.sampleRate
     }
 
     func seek(to time: TimeInterval) {
-        guard let player else { return }
-        player.currentTime = min(max(0, time), player.duration)
+        guard let file = audioFile else { return }
+        let wasPlaying = isPlaying
+        let frame = AVAudioFramePosition(
+            min(
+                max(0, time),
+                duration
+            ) * file.processingFormat.sampleRate
+        )
+        pausedFrame = min(max(0, frame), file.length)
+        playerNode.stop()
+        spectrumAnalyzer.reset()
+        if wasPlaying {
+            play()
+        }
+    }
+
+    private func installSpectrumTap() {
+        engine.mainMixerNode.removeTap(onBus: 0)
+        engine.mainMixerNode.installTap(
+            onBus: 0,
+            bufferSize: 1024,
+            format: engine.mainMixerNode.outputFormat(forBus: 0)
+        ) { [weak spectrumAnalyzer] buffer, _ in
+            spectrumAnalyzer?.analyze(buffer)
+        }
+    }
+
+    private func schedulePlayback(from frame: AVAudioFramePosition) -> Bool {
+        guard let file = audioFile else { return false }
+        let requestedFrame = min(max(0, frame), file.length)
+        let startFrame = requestedFrame >= file.length ? 0 : requestedFrame
+        let remainingFrames = AVAudioFrameCount(max(0, file.length - startFrame))
+        guard remainingFrames > 0 else {
+            pausedFrame = 0
+            return false
+        }
+
+        playbackStartFrame = startFrame
+        pausedFrame = startFrame
+        playerNode.stop()
+        playerNode.scheduleSegment(
+            file,
+            startingFrame: startFrame,
+            frameCount: remainingFrames,
+            at: nil
+        )
+        return true
+    }
+
+    private func currentFrame() -> AVAudioFramePosition {
+        guard let nodeTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+            return pausedFrame
+        }
+
+        let frame = playbackStartFrame + AVAudioFramePosition(playerTime.sampleTime)
+        if let file = audioFile {
+            return min(max(0, frame), file.length)
+        }
+        return max(0, frame)
+    }
+}
+
+private final class LiveSpectrumAnalyzer {
+    private let binCount: Int
+    private let fftSize: Int
+    private let log2FFTSize: vDSP_Length
+    private let fftSetup: FFTSetup
+    private let lock = NSLock()
+    private var window: [Float]
+    private var monoSamples: [Float]
+    private var realParts: [Float]
+    private var imaginaryParts: [Float]
+    private var magnitudes: [Float]
+    private var smoothedBins: [Float]
+    private var latestBins: [Float]
+    private var rollingPeak: Float = 0.12
+
+    init(binCount: Int, fftSize: Int = 1024) {
+        self.binCount = binCount
+        self.fftSize = fftSize
+        self.log2FFTSize = vDSP_Length(log2(Float(fftSize)))
+        self.fftSetup = vDSP_create_fftsetup(log2FFTSize, FFTRadix(kFFTRadix2))!
+        self.window = Array(repeating: 0, count: fftSize)
+        self.monoSamples = Array(repeating: 0, count: fftSize)
+        self.realParts = Array(repeating: 0, count: fftSize / 2)
+        self.imaginaryParts = Array(repeating: 0, count: fftSize / 2)
+        self.magnitudes = Array(repeating: 0, count: fftSize / 2)
+        self.smoothedBins = Array(repeating: 0, count: binCount)
+        self.latestBins = Array(repeating: 0, count: binCount)
+        vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+    }
+
+    deinit {
+        vDSP_destroy_fftsetup(fftSetup)
+    }
+
+    func analyze(_ buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData else { return }
+
+        let frameCount = min(Int(buffer.frameLength), fftSize)
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        monoSamples.withUnsafeMutableBufferPointer { samples in
+            samples.initialize(repeating: 0)
+            for frame in 0..<frameCount {
+                var total: Float = 0
+                for channel in 0..<channelCount {
+                    total += channelData[channel][frame]
+                }
+                samples[frame] = total / Float(channelCount)
+            }
+        }
+
+        vDSP_vmul(
+            monoSamples,
+            1,
+            window,
+            1,
+            &monoSamples,
+            1,
+            vDSP_Length(fftSize)
+        )
+
+        realParts.withUnsafeMutableBufferPointer { realBuffer in
+            imaginaryParts.withUnsafeMutableBufferPointer { imaginaryBuffer in
+                monoSamples.withUnsafeBufferPointer { sampleBuffer in
+                    var splitComplex = DSPSplitComplex(
+                        realp: realBuffer.baseAddress!,
+                        imagp: imaginaryBuffer.baseAddress!
+                    )
+                    sampleBuffer.baseAddress!.withMemoryRebound(
+                        to: DSPComplex.self,
+                        capacity: fftSize / 2
+                    ) { complexSamples in
+                        vDSP_ctoz(
+                            complexSamples,
+                            2,
+                            &splitComplex,
+                            1,
+                            vDSP_Length(fftSize / 2)
+                        )
+                    }
+                    vDSP_fft_zrip(
+                        fftSetup,
+                        &splitComplex,
+                        1,
+                        log2FFTSize,
+                        FFTDirection(FFT_FORWARD)
+                    )
+                    vDSP_zvmags(
+                        &splitComplex,
+                        1,
+                        &magnitudes,
+                        1,
+                        vDSP_Length(fftSize / 2)
+                    )
+                }
+            }
+        }
+
+        lock.lock()
+        let nextBins = spectrumBins(from: magnitudes)
+        latestBins = nextBins
+        lock.unlock()
+    }
+
+    func snapshot() -> [Float] {
+        lock.lock()
+        let bins = latestBins
+        lock.unlock()
+        return bins
+    }
+
+    func silentSnapshot() -> [Float] {
+        Array(repeating: 0, count: binCount)
+    }
+
+    func reset() {
+        lock.lock()
+        rollingPeak = 0.12
+        smoothedBins = Array(repeating: 0, count: binCount)
+        latestBins = Array(repeating: 0, count: binCount)
+        lock.unlock()
+    }
+
+    private func spectrumBins(from magnitudes: [Float]) -> [Float] {
+        guard binCount > 0 else { return [] }
+
+        let usableBins = max(2, magnitudes.count - 2)
+        var rawBins = Array(repeating: Float(0), count: binCount)
+        for index in 0..<binCount {
+            let lower = frequencyIndex(for: index, usableBins: usableBins)
+            let upper = max(lower + 1, frequencyIndex(for: index + 1, usableBins: usableBins))
+            var total: Float = 0
+            var samples = 0
+            for magnitudeIndex in lower..<min(upper, magnitudes.count) {
+                total += magnitudes[magnitudeIndex]
+                samples += 1
+            }
+            rawBins[index] = samples > 0 ? sqrt(total / Float(samples)) : 0
+        }
+
+        let currentPeak = max(rawBins.max() ?? 0.0001, 0.0001)
+        rollingPeak = max(currentPeak, rollingPeak * 0.90)
+
+        for index in 0..<binCount {
+            let normalized = min(max(rawBins[index] / rollingPeak, 0), 1)
+            let shaped = pow(normalized, 0.52)
+            let coefficient: Float = shaped > smoothedBins[index] ? 0.72 : 0.36
+            smoothedBins[index] += (shaped - smoothedBins[index]) * coefficient
+        }
+
+        return smoothedBins.map { min(max($0, 0), 1) }
+    }
+
+    private func frequencyIndex(for visualBin: Int, usableBins: Int) -> Int {
+        let position = Float(visualBin) / Float(max(1, binCount))
+        let curved = pow(position, 2.25)
+        return min(max(1, Int(curved * Float(usableBins))), usableBins)
     }
 }
