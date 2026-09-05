@@ -4,17 +4,14 @@ import SwiftUI
 @main
 struct TVisualiserApp: App {
     @StateObject private var player: MediaPlayerStore
-    @StateObject private var telegram: TelegramAccountStore
-    @StateObject private var googleDrive: GoogleDriveAccountStore
+    @StateObject private var ftp: FTPAccountStore
     
     init() {
         //DebugSettings.enabled = true
         let player = MediaPlayerStore()
-        let telegram = TelegramAccountStore()
-        let googleDrive = GoogleDriveAccountStore()
+        let ftp = FTPAccountStore()
         _player = StateObject(wrappedValue: player)
-        _telegram = StateObject(wrappedValue: telegram)
-        _googleDrive = StateObject(wrappedValue: googleDrive)
+        _ftp = StateObject(wrappedValue: ftp)
         player.start()
     }
     
@@ -22,8 +19,7 @@ struct TVisualiserApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(player)
-                .environmentObject(telegram)
-                .environmentObject(googleDrive)
+                .environmentObject(ftp)
         }
     }
 }

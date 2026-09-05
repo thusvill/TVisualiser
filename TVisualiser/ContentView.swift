@@ -15,7 +15,7 @@ import UIKit
 struct ContentView: View {
 
     @EnvironmentObject private var receiver: MediaPlayerStore
-    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
+    @EnvironmentObject private var ftp: FTPAccountStore
 
     // ------------------------------------------------------------
     // Settings
@@ -1259,7 +1259,7 @@ struct ClockView: View {
 
 struct MediaLibraryView: View {
 
-    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
+    @EnvironmentObject private var ftp: FTPAccountStore
     @EnvironmentObject private var player: MediaPlayerStore
     @Environment(\.presentationMode) private var presentationMode
 
@@ -1270,24 +1270,15 @@ struct MediaLibraryView: View {
     var body: some View {
         NavigationView {
             List {
-                Section("Google Drive") {
-                    switch googleDrive.state {
-                    case .signedOut:
-                        Text("Connect Google Drive in Settings first.")
+                Section("FTP") {
+                    if !ftp.isConfigured {
+                        Text("Configure the local FTP server in Settings.")
                         Button("Open Settings") {
                             presentationMode.wrappedValue.dismiss()
                         }
-                    case .waitingForApproval:
-                        Text("Finish Google sign-in in your browser.")
-                        Text("Code: \(googleDrive.userCode)")
-                            .font(.title2.monospaced())
-                    case .failed(let message):
-                        Text(message).foregroundStyle(.red)
-                    case .signedIn:
-                        Button(isLoading ? "Loading files..." : "Refresh files") {
-                            refresh()
-                        }
-                        .disabled(isLoading)
+                    } else {
+                        Button(isLoading ? "Loading files..." : "Refresh files") { refresh() }
+                            .disabled(isLoading)
 
                         if tracks.isEmpty && !isLoading {
                             Text("No audio or video files available to this app.")
@@ -1296,7 +1287,7 @@ struct MediaLibraryView: View {
 
                         ForEach(tracks) { track in
                             Button {
-                                let source = GoogleDriveMediaSource(account: googleDrive)
+                                let source = FTPMediaSource(account: ftp)
                                 player.load(track: track, from: source)
                                 presentationMode.wrappedValue.dismiss()
                             } label: {
@@ -1322,7 +1313,7 @@ struct MediaLibraryView: View {
                 }
             }
             .task {
-                if case .signedIn = googleDrive.state {
+                if ftp.isConfigured {
                     refresh()
                 }
             }
@@ -1334,7 +1325,7 @@ struct MediaLibraryView: View {
         errorMessage = ""
         Task {
             do {
-                tracks = try await GoogleDriveMediaSource(account: googleDrive).tracks()
+                tracks = try await FTPMediaSource(account: ftp).tracks()
             } catch {
                 tracks = []
                 errorMessage = error.localizedDescription
@@ -1350,8 +1341,7 @@ struct MediaLibraryView: View {
 
 struct SettingsView: View {
 
-    @EnvironmentObject private var telegram: TelegramAccountStore
-    @EnvironmentObject private var googleDrive: GoogleDriveAccountStore
+    @EnvironmentObject private var ftp: FTPAccountStore
     @EnvironmentObject private var player: MediaPlayerStore
 
     @Environment(
@@ -1370,9 +1360,6 @@ struct SettingsView: View {
 
     @AppStorage("waveformSensitivity")
     private var waveformSensitivity: Double = 1.0
-
-    @State private var driveTracks: [MediaTrack] = []
-    @State private var driveIsLoading = false
 
     var body: some View {
 
@@ -1407,61 +1394,16 @@ struct SettingsView: View {
                     )
                 }
 
-                Section("Telegram") {
-                    TextField("Phone number", text: $telegram.phoneNumber)
-
-                    switch telegram.state {
-                    case .signedIn(let name):
-                        Label("Signed in as \(name)", systemImage: "checkmark.circle")
-                        Button("Sign Out") { telegram.signOut() }
-                    case .failed(let message):
-                        Text(message).foregroundStyle(.red)
-                    default:
-                        Text("Telegram login is stored in Keychain after MTProto authorization.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Google Drive") {
-                    switch googleDrive.state {
-                    case .signedOut:
-                        Button("Sign In to Google Drive") {
-                            googleDrive.signIn()
-                        }
-                        Text("A code will appear here. Open the verification link on another device.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    case .waitingForApproval:
-                        Text("Code: \(googleDrive.userCode)")
-                            .font(.title2.monospaced())
-                        if let verificationURL = googleDrive.verificationURL {
-                            Text(verificationURL.absoluteString)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        Button("Cancel Sign In") { googleDrive.signOut() }
-                    case .signedIn:
-                        Label("Google Drive connected", systemImage: "checkmark.circle")
-                        Button(driveIsLoading ? "Loading..." : "Refresh Drive Files") {
-                            refreshDriveFiles()
-                        }
-                        .disabled(driveIsLoading)
-
-                        ForEach(driveTracks) { track in
-                            Button {
-                                let source = GoogleDriveMediaSource(account: googleDrive)
-                                player.load(track: track, from: source)
-                                presentationMode.wrappedValue.dismiss()
-                            } label: {
-                                Label(track.title, systemImage: "music.note")
-                            }
-                        }
-                        Button("Sign Out") { googleDrive.signOut() }
-                    case .failed(let message):
-                        Text(message).foregroundStyle(.red)
-                        Button("Try Again") { googleDrive.signIn() }
-                    }
+                Section("FTP") {
+                    TextField("Server address", text: $ftp.host)
+                    TextField("Port", value: $ftp.port, format: .number)
+                    TextField("Username", text: $ftp.username)
+                    SecureField("Password", text: $ftp.password)
+                    TextField("Media folder", text: $ftp.path)
+                    Button("Save FTP Settings") { ftp.save() }
+                    Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section(
@@ -1522,22 +1464,7 @@ struct SettingsView: View {
                 }
             }
             .task {
-                if case .signedIn = googleDrive.state {
-                    refreshDriveFiles()
-                }
             }
-        }
-    }
-
-    private func refreshDriveFiles() {
-        driveIsLoading = true
-        Task {
-            do {
-                driveTracks = try await GoogleDriveMediaSource(account: googleDrive).tracks()
-            } catch {
-                driveTracks = []
-            }
-            driveIsLoading = false
         }
     }
 }
@@ -1620,6 +1547,5 @@ struct ValueStepper: View {
 
     ContentView()
         .environmentObject(MediaPlayerStore())
-        .environmentObject(TelegramAccountStore())
-        .environmentObject(GoogleDriveAccountStore())
+        .environmentObject(FTPAccountStore())
 }
