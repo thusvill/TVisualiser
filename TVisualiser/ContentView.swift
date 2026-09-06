@@ -8,6 +8,32 @@
 import SwiftUI
 import UIKit
 
+
+// ================================================================
+// MARK: - Focus Foreground Model
+// ================================================================
+
+
+private struct FocusAwareForeground: ViewModifier {
+    @Environment(\.isFocused) private var isFocused
+
+    let normal: Color
+    let focused: Color
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(isFocused ? focused : normal)
+    }
+}
+
+extension View {
+    func focusAwareForeground(normal: Color, focused: Color) -> some View {
+        modifier(FocusAwareForeground(normal: normal, focused: focused))
+    }
+}
+
+
+
+
 // ================================================================
 // MARK: - Shared Focus Model
 // ================================================================
@@ -26,6 +52,37 @@ enum TVFocusArea: Hashable {
     case backward
     case playPause
     case forward
+}
+
+// ================================================================
+// MARK: - Waveform Style
+// ================================================================
+//
+// Describes how the waveform *renders* each sample — independent from
+// SpectrumLayout (which decides how bands are spatially arranged) and
+// independent from the analyzer. Adding a new visual style only means
+// adding a case here plus one Shape in AudioVisualizerView; nothing
+// upstream of rendering needs to change.
+//
+// Stored as a raw String via @AppStorage("waveformStyle"), the same
+// pattern already used for showClock / waveformLineWidth / etc., so the
+// selection persists automatically and stays in sync between ContentView
+// and SettingsView without any extra plumbing.
+//
+enum WaveformStyle: String, CaseIterable, Identifiable {
+    case bars
+    case line
+    case dots
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bars: return "Bars"
+        case .line: return "Line"
+        case .dots: return "Dots"
+        }
+    }
 }
 
 // ================================================================
@@ -52,6 +109,13 @@ struct ContentView: View {
 
     @AppStorage("waveformSensitivity")
     private var waveformSensitivity: Double = 1.0
+
+    @AppStorage("waveformStyle")
+    private var waveformStyleRaw: String = WaveformStyle.bars.rawValue
+
+    private var waveformStyle: WaveformStyle {
+        WaveformStyle(rawValue: waveformStyleRaw) ?? .bars
+    }
 
     // ------------------------------------------------------------
     // State
@@ -113,7 +177,8 @@ struct ContentView: View {
                         data: receiver.waveform,
                         color: (dynamicWaveformColor ? receiver.palette.mutedLight : receiver.palette.primaryText) ?? receiver.palette.primaryText,
                         sensitivity: waveformSensitivity,
-                        lineWidth: waveformLineWidth
+                        lineWidth: waveformLineWidth,
+                        style: waveformStyle
                     )
                     .frame(width: width, height: 100)
 
@@ -244,7 +309,8 @@ struct HeaderView: View {
                     Button(action: onMedia) {
                         Label("Media", systemImage: "music.note.list")
                             .font(.system(size: 17, weight: .medium, design: .rounded))
-                            .foregroundStyle(receiver.palette.primaryText)
+//                            .foregroundStyle(receiver.palette.primaryText)
+                            .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                             .padding(.horizontal, 18)
                             .padding(.vertical, 11)
                             .background(pillBackground)
@@ -266,7 +332,8 @@ struct HeaderView: View {
                             Text("Select to open settings")
                                 .font(.system(size: 17, weight: .medium, design: .rounded))
                         }
-                        .foregroundStyle(receiver.palette.primaryText)
+//                        .foregroundStyle(receiver.palette.primaryText)
+                        .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 11)
                         .background(pillBackground)
@@ -274,6 +341,7 @@ struct HeaderView: View {
                             Capsule()
                                 .stroke(receiver.palette.accent, lineWidth: 1)
                         }
+                        
                         .shadow(
                             color: Color.black.opacity(0.25),
                             radius: 12,
@@ -384,18 +452,19 @@ struct TVButtonStyle: ButtonStyle {
 
     @Environment(\.isFocused) private var isFocused
 
-
     var accentColor: Color = .accentColor
+    var focusedTextColor: Color = .black   // text color while focused
 
     func makeBody(configuration: Configuration) -> some View {
 
         configuration.label
+            .foregroundStyle(isFocused ? focusedTextColor : Color.primary)
             .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .opacity(configuration.isPressed ? 0.75 : 1.0)
-            .scaleEffect(isFocused ? 1.25 : 1.0)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
 //            .overlay {
 //                if isFocused {
-//                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+//                    RoundedRectangle(cornerRadius: 50, style: .continuous)
 //                        .stroke(accentColor, lineWidth: 3)
 //                        .padding(-7)
 //                }
@@ -475,7 +544,8 @@ struct MetadataView: View {
 
             Text(title.isEmpty ? "Select a media source" : title)
                 .font(.system(size: 31, weight: .bold, design: .rounded))
-                .foregroundStyle(receiver.palette.primaryText)
+//                .foregroundStyle(receiver.palette.primaryText)
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
@@ -501,30 +571,58 @@ struct MetadataView: View {
 // ================================================================
 // MARK: - Audio Visualizer
 // ================================================================
-
+//
+// Renders `data` using whichever WaveformStyle is currently selected.
+// Each style is its own Shape, all consuming the same normalized
+// sample array — swapping styles never touches the analyzer or the
+// SpectrumLayout arrangement upstream.
+//
 struct AudioVisualizerView: View {
 
     let data: [Float]
     let color: Color
     let sensitivity: Double
     let lineWidth: Double
+    var style: WaveformStyle = .bars
 
     var body: some View {
-        WaveformBars(data: data, sensitivity: sensitivity)
-            .stroke(
-                color.opacity(0.88),
-                style: StrokeStyle(
-                    lineWidth: lineWidth,
-                    lineCap: .round,
-                    lineJoin: .round
-                )
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .drawingGroup()
+        Group {
+            switch style {
+            case .bars:
+                WaveformBars(data: data, sensitivity: sensitivity)
+                    .stroke(
+                        color.opacity(0.88),
+                        style: StrokeStyle(
+                            lineWidth: lineWidth,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+
+            case .line:
+                WaveformLine(data: data, sensitivity: sensitivity)
+                    .stroke(
+                        color.opacity(0.88),
+                        style: StrokeStyle(
+                            lineWidth: lineWidth,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+
+            case .dots:
+                WaveformDots(data: data, sensitivity: sensitivity, dotSize: max(lineWidth * 1.8, 3))
+                    .fill(color.opacity(0.88))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .drawingGroup()
     }
 }
 
+/// "Bars" style — a vertical segment per sample, mirrored above/below
+/// center. This is the original waveform look.
 private struct WaveformBars: Shape {
     let data: [Float]
     let sensitivity: Double
@@ -544,6 +642,79 @@ private struct WaveformBars: Shape {
             let x = rect.minX + step * (CGFloat(index) + 0.5)
             path.move(to: CGPoint(x: x, y: centerY - barHeight))
             path.addLine(to: CGPoint(x: x, y: centerY + barHeight))
+        }
+        return path
+    }
+}
+
+/// "Line" style — a single continuous line tracing each sample's peak
+/// across the width, like a classic spectrum/EQ line graph.
+private struct WaveformLine: Shape {
+    let data: [Float]
+    let sensitivity: Double
+
+    func path(in rect: CGRect) -> Path {
+        let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
+        let sensitivityF = Float(sensitivity)
+        let step = rect.width / CGFloat(max(1, values.count - 1))
+        let centerY = rect.midY
+        let usableHeight = rect.height * 0.46
+        var path = Path()
+
+        var points: [CGPoint] = []
+        points.reserveCapacity(values.count)
+        for index in values.indices {
+            let normalized = max(0.02, min(1, values[index] * sensitivityF))
+            let shaped = CGFloat(pow(normalized, 0.72))
+            let peakHeight = max(CGFloat(2), shaped * usableHeight)
+            let x = rect.minX + step * CGFloat(index)
+            points.append(CGPoint(x: x, y: centerY - peakHeight))
+        }
+
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
+        return path
+    }
+}
+
+/// "Dots" style — a pair of dots per sample (mirrored above/below
+/// center, matching the Bars layout) instead of a connecting stroke.
+private struct WaveformDots: Shape {
+    let data: [Float]
+    let sensitivity: Double
+    let dotSize: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
+        let sensitivityF = Float(sensitivity)
+        let step = rect.width / CGFloat(max(1, values.count))
+        let centerY = rect.midY
+        let usableHeight = rect.height * 0.46
+        var path = Path()
+
+        for index in values.indices {
+            let normalized = max(0.02, min(1, values[index] * sensitivityF))
+            let shaped = CGFloat(pow(normalized, 0.72))
+            let barHeight = max(CGFloat(2), shaped * usableHeight)
+            let x = rect.minX + step * (CGFloat(index) + 0.5)
+
+            let topRect = CGRect(
+                x: x - dotSize / 2,
+                y: (centerY - barHeight) - dotSize / 2,
+                width: dotSize,
+                height: dotSize
+            )
+            let bottomRect = CGRect(
+                x: x - dotSize / 2,
+                y: (centerY + barHeight) - dotSize / 2,
+                width: dotSize,
+                height: dotSize
+            )
+            path.addEllipse(in: topRect)
+            path.addEllipse(in: bottomRect)
         }
         return path
     }
@@ -586,7 +757,8 @@ struct MediaControlCard: View {
                 Button(action: onBackward) {
                     Image(systemName: "gobackward.10")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(receiver.palette.primaryText)
+//                        .foregroundStyle(receiver.palette.primaryText)
+                        .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                         .frame(width: 55, height: 55)
                 }
                 .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
@@ -614,7 +786,8 @@ struct MediaControlCard: View {
                 Button(action: onForward) {
                     Image(systemName: "goforward.10")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(receiver.palette.primaryText)
+//                        .foregroundStyle(receiver.palette.primaryText)
+                        .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                         .frame(width: 55, height: 55)
                 }
                 .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
@@ -800,7 +973,8 @@ struct ClockView: View {
             Text(date, format: .dateTime.hour().minute())
                 .font(.system(size: 40, weight: .bold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(receiver.palette.primaryText)
+//                .foregroundStyle(receiver.palette.primaryText)
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
 
             Text(date, format: .dateTime.weekday(.abbreviated))
                 .font(.system(size: 21, weight: .bold, design: .rounded))
@@ -852,7 +1026,8 @@ struct MediaLibraryView: View {
                             }
                         } label: {
                             Label(track.title, systemImage: "play.circle")
-                                .foregroundStyle(player.palette.primaryText)
+//                                .foregroundStyle(player.palette.primaryText)
+                                .focusAwareForeground(normal: player.palette.primaryText, focused: player.palette.accent)
                         }
                         .buttonStyle(TVButtonStyle(accentColor: player.palette.accent))
                     }
@@ -932,6 +1107,9 @@ struct SettingsView: View {
     @AppStorage("waveformSensitivity")
     private var waveformSensitivity: Double = 1.0
 
+    @AppStorage("waveformStyle")
+    private var waveformStyleRaw: String = WaveformStyle.bars.rawValue
+
     var body: some View {
 
     NavigationView {
@@ -940,7 +1118,8 @@ struct SettingsView: View {
             Section {
                 Text("TVisualiser")
                     .font(.title2.bold())
-                    .foregroundStyle(player.palette.primaryText)
+//                    .foregroundStyle(player.palette.primaryText)
+                    .focusAwareForeground(normal: player.palette.primaryText, focused: player.palette.accent)
                 Text("Choose a source to begin playback.")
                     .foregroundStyle(player.palette.secondaryText)
             }
@@ -966,6 +1145,7 @@ struct SettingsView: View {
             Section("Waveform") {
                 Toggle("Dynamic color from cover art", isOn: $dynamicWaveformColor)
                     .tint(player.palette.accent)
+                WaveformStyleSelector(styleRaw: $waveformStyleRaw, receiver: player)
                 ValueStepper(label: "Line width", value: $waveformLineWidth, range: 1...6, step: 0.5, receiver: player)
                 ValueStepper(label: "Sensitivity", value: $waveformSensitivity, range: 0.5...2.0, step: 0.1, receiver: player)
             }
@@ -1020,29 +1200,34 @@ struct ValueStepper: View {
 
         HStack(spacing: 18) {
             Text(label)
-                .foregroundStyle(receiver.palette.primaryText)
+//                .foregroundStyle(receiver.palette.primaryText)
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
             Spacer()
 
             Button(action: decrease) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(receiver.palette.primaryText)
+//                    .foregroundStyle(receiver.palette.primaryText)
+                    .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
             }
             .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
             .disabled(value <= range.lowerBound)
 
             Text(String(format: "%.1f", value))
                 .font(.system(.body, design: .rounded).monospacedDigit())
-                .foregroundStyle(receiver.palette.primaryText)
+//                .foregroundStyle(receiver.palette.primaryText)
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
                 .frame(width: 54)
 
             Button(action: increase) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(receiver.palette.primaryText)
+//                    .foregroundStyle(receiver.palette.primaryText)
+                    .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
             }
             .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
             .disabled(value >= range.upperBound)
+            
         }
         .padding(.vertical, 8)
     }
@@ -1053,6 +1238,69 @@ struct ValueStepper: View {
 
     private func increase() {
         value = min(range.upperBound, value + step)
+    }
+}
+
+// ================================================================
+// MARK: - Waveform Style Selector
+// ================================================================
+//
+// Same pattern as ValueStepper (left/right chevrons + a label in the
+// middle), just cycling through WaveformStyle.allCases instead of a
+// numeric range. Keeps the Settings screen's visual/focus language
+// consistent instead of introducing a Picker with different behavior.
+//
+struct WaveformStyleSelector: View {
+
+    @Binding var styleRaw: String
+
+    let receiver: MediaPlayerStore
+
+    private var style: WaveformStyle {
+        WaveformStyle(rawValue: styleRaw) ?? .bars
+    }
+
+    var body: some View {
+
+        HStack(spacing: 18) {
+            Text("Waveform style")
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
+            Spacer()
+
+            Button(action: previous) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
+            }
+            .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+
+            Text(style.displayName)
+                .font(.system(.body, design: .rounded))
+                .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
+                .frame(width: 90)
+
+            Button(action: next) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .focusAwareForeground(normal: receiver.palette.primaryText, focused: receiver.palette.accent)
+            }
+            .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func previous() {
+        let all = WaveformStyle.allCases
+        guard let index = all.firstIndex(of: style) else { return }
+        let newIndex = (index - 1 + all.count) % all.count
+        styleRaw = all[newIndex].rawValue
+    }
+
+    private func next() {
+        let all = WaveformStyle.allCases
+        guard let index = all.firstIndex(of: style) else { return }
+        let newIndex = (index + 1) % all.count
+        styleRaw = all[newIndex].rawValue
     }
 }
 
