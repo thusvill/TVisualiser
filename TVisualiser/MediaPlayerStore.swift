@@ -6,6 +6,88 @@ import Foundation
 import SwiftUI
 import UIKit
 
+// ================================================================
+// MARK: - Spectrum Layout
+// ================================================================
+
+/// Describes how an ascending (bass -> treble) array of band energies gets
+/// spatially arranged across the display bins. New visual arrangements —
+/// a different bar layout, a mirrored wave, etc. — only need a new case
+/// here; the FFT/analysis code never needs to change.
+enum SpectrumLayout {
+
+    /// Bass sits in the middle, fanning out to treble on both edges.
+    /// (Classic media-player look.)
+    case centerOut
+
+    /// Bass on the left, treble on the right — a plain ascending sweep.
+    case leftToRight
+
+    /// Bass on the right, treble on the left — mirror of `leftToRight`.
+    case rightToLeft
+
+    /// Treble sits in the middle, bass at both edges (inverse of `centerOut`).
+    case edgesIn
+
+    /// Arranges `bands` (ascending bass -> treble, any length) into
+    /// `totalCount` display bins according to this layout.
+    func arrange(bands: [Float], totalCount: Int) -> [Float] {
+        guard totalCount > 0, !bands.isEmpty else {
+            return Array(repeating: 0, count: max(0, totalCount))
+        }
+
+        switch self {
+        case .leftToRight:
+            return Self.resample(bands, to: totalCount)
+
+        case .rightToLeft:
+            return Self.resample(bands, to: totalCount).reversed()
+
+        case .centerOut:
+            let half = max(1, totalCount / 2)
+            let halfBands = Self.resample(bands, to: half)
+            var result = Array(repeating: Float(0), count: totalCount)
+            for k in 0..<half {
+                result[k] = halfBands[half - 1 - k]
+            }
+            for k in 0..<(totalCount - half) {
+                let sourceIndex = min(k, half - 1)
+                result[half + k] = halfBands[sourceIndex]
+            }
+            return result
+
+        case .edgesIn:
+            let centerOut = SpectrumLayout.centerOut.arrange(bands: bands, totalCount: totalCount)
+            let half = totalCount / 2
+            var result = Array(repeating: Float(0), count: totalCount)
+            for i in 0..<totalCount {
+                result[i] = centerOut[(i + half) % totalCount]
+            }
+            return result
+        }
+    }
+
+    /// Linearly resamples `values` to exactly `count` entries, preserving
+    /// the ascending shape regardless of how the source/target lengths differ.
+    private static func resample(_ values: [Float], to count: Int) -> [Float] {
+        guard count > 0 else { return [] }
+        guard values.count > 1 else {
+            return Array(repeating: values.first ?? 0, count: count)
+        }
+
+        var output = Array(repeating: Float(0), count: count)
+        let lastIndex = Float(values.count - 1)
+        for i in 0..<count {
+            let position = count > 1 ? (Float(i) / Float(count - 1)) * lastIndex : 0
+            let lower = Int(position)
+            let upper = min(lower + 1, values.count - 1)
+            let fraction = position - Float(lower)
+            output[i] = values[lower] * (1 - fraction) + values[upper] * fraction
+        }
+        return output
+    }
+}
+
 @MainActor
 final class MediaPlayerStore: ObservableObject {
     @Published private(set) var isPlaying = false
@@ -19,11 +101,35 @@ final class MediaPlayerStore: ObservableObject {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var activeSourceID: String?
 
+    /// Change this to switch how the spectrum bars are spatially arranged
+    /// (e.g. from a future Settings toggle) without touching the analyzer.
+    @Published var spectrumLayout: SpectrumLayout = .edgesIn {
+        didSet { playback.setSpectrumLayout(spectrumLayout) }
+    }
+
+    @Published private(set) var palette: AlbumPalette = .default
+
     nonisolated private static let waveformSampleCount = 96
 
     private let playback = AudioPlaybackEngine()
     private var timer: Timer?
 
+    func updateWaveform(_ waveformValues: [Float]) {
+        guard waveformValues.count == Self.waveformSampleCount else { return }
+        
+        // Smoothness factor (0.2 = smooth & fluid, 0.5 = punchy, 1.0 = instant)
+        let smoothingFactor: Float = 0.22
+        
+        var smoothed = waveform
+        for i in 0..<Self.waveformSampleCount {
+            smoothed[i] += (waveformValues[i] - smoothed[i]) * smoothingFactor
+        }
+        
+        withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.86)) {
+            self.waveform = smoothed
+        }
+    }
+    
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -39,7 +145,8 @@ final class MediaPlayerStore: ObservableObject {
         isPlaying = false
         currentTime = 0
         duration = 0
-        waveform = Self.silentWaveform()
+        //waveform = Self.silentWaveform()
+        updateWaveform(Self.silentWaveform())
     }
 
     func select(source: any MediaSource) {
@@ -61,12 +168,18 @@ final class MediaPlayerStore: ObservableObject {
                 artist = preparedTrack.artist
                 album = preparedTrack.album
                 duration = playback.duration
-                waveform = Self.silentWaveform()
+//                waveform = Self.silentWaveform()
+                updateWaveform(Self.silentWaveform())
                 currentTime = 0
                 let artworkData = preparedTrack.artworkData ?? playback.artworkData()
                 artwork = artworkData.flatMap(UIImage.init(data:))
                 waveformColor = artwork.flatMap(Self.averageColor) ?? .black
                 isPlaying = false
+                if let artwork {
+                                withAnimation(.easeInOut(duration: 0.5)) {
+                                    self.palette = PaletteExtractor.extract(from: artwork)
+                                }
+                            }
             } catch {
                 trackTitle = error.localizedDescription
                 isPlaying = false
@@ -83,7 +196,8 @@ final class MediaPlayerStore: ObservableObject {
         }
         isPlaying = playback.isPlaying
         if !isPlaying {
-            waveform = Self.silentWaveform()
+//            waveform = Self.silentWaveform()
+            updateWaveform(Self.silentWaveform())
         }
     }
 
@@ -105,11 +219,13 @@ final class MediaPlayerStore: ObservableObject {
     private func updatePlaybackState() {
         guard isPlaying else {
             if waveform.contains(where: { $0 != 0 }) {
-                waveform = Self.silentWaveform()
+//                waveform = Self.silentWaveform()
+                updateWaveform(Self.silentWaveform())
             }
             return
         }
-        waveform = playback.spectrum()
+        //waveform = playback.spectrum()
+        updateWaveform(playback.spectrum())
         let actualTime = playback.currentTime()
         if actualTime.isFinite && actualTime > 0 {
             currentTime = duration > 0 ? min(duration, actualTime) : actualTime
@@ -184,6 +300,10 @@ private final class AudioPlaybackEngine {
     func spectrum() -> [Float] {
         guard isPlaying else { return spectrumAnalyzer.silentSnapshot() }
         return spectrumAnalyzer.snapshot()
+    }
+
+    func setSpectrumLayout(_ layout: SpectrumLayout) {
+        spectrumAnalyzer.setLayout(layout)
     }
 
     func play() {
@@ -291,23 +411,58 @@ private final class AudioPlaybackEngine {
     }
 }
 
+// ================================================================
+// MARK: - Live Spectrum Analyzer
+// ================================================================
+//
+// Pipeline, each step isolated so future changes stay contained:
+//
+//   1. FFT the incoming audio buffer -> raw magnitudes.
+//   2. Group magnitudes into `bandResolution` perceptually-spaced bands,
+//      ascending bass -> treble (this is the "frequency analysis" step —
+//      it never needs to know about layout or display bin count).
+//   3. Normalize EACH band against its OWN rolling peak (not a single
+//      global peak). This is what fixes bass reading as permanently
+//      "full": previously every band was compared against whichever band
+//      was loudest that frame — which is nearly always bass in real
+//      music — so bass constantly divided by itself and pinned near 1.0.
+//      Now every band's 0...1 value reflects its own recent dynamics.
+//   4. Hand the normalized, ascending band array to the current
+//      `SpectrumLayout`, which arranges it into `binCount` display bins
+//      (center-out, left-to-right, etc.). Swap `layout` to support a new
+//      visual style — nothing above this step changes.
+//   5. Per-slot attack/release smoothing for fluid on-screen motion.
+//
 private final class LiveSpectrumAnalyzer {
     private let binCount: Int
+    private let bandResolution: Int
     private let fftSize: Int
     private let log2FFTSize: vDSP_Length
     private let fftSetup: FFTSetup
     private let lock = NSLock()
+
     private var window: [Float]
     private var monoSamples: [Float]
     private var realParts: [Float]
     private var imaginaryParts: [Float]
     private var magnitudes: [Float]
+
+    private var bandPeaks: [Float]
     private var smoothedBins: [Float]
     private var latestBins: [Float]
-    private var rollingPeak: Float = 0.12
+    private var currentLayout: SpectrumLayout = .centerOut
 
-    init(binCount: Int, fftSize: Int = 1024) {
+    /// How quickly each band's individual peak relaxes when the signal
+    /// drops. Closer to 1.0 = slower fall (smoother, more "floaty"),
+    /// closer to 0 = snappier but jitterier.
+    private let bandPeakDecay: Float = 0.97
+
+    /// Prevents near-silence from being amplified into visible noise.
+    private let minimumBandFloor: Float = 0.02
+
+    init(binCount: Int, bandResolution: Int = 64, fftSize: Int = 1024) {
         self.binCount = binCount
+        self.bandResolution = bandResolution
         self.fftSize = fftSize
         self.log2FFTSize = vDSP_Length(log2(Float(fftSize)))
         self.fftSetup = vDSP_create_fftsetup(log2FFTSize, FFTRadix(kFFTRadix2))!
@@ -316,6 +471,7 @@ private final class LiveSpectrumAnalyzer {
         self.realParts = Array(repeating: 0, count: fftSize / 2)
         self.imaginaryParts = Array(repeating: 0, count: fftSize / 2)
         self.magnitudes = Array(repeating: 0, count: fftSize / 2)
+        self.bandPeaks = Array(repeating: minimumBandFloor, count: bandResolution)
         self.smoothedBins = Array(repeating: 0, count: binCount)
         self.latestBins = Array(repeating: 0, count: binCount)
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
@@ -323,6 +479,12 @@ private final class LiveSpectrumAnalyzer {
 
     deinit {
         vDSP_destroy_fftsetup(fftSetup)
+    }
+
+    func setLayout(_ layout: SpectrumLayout) {
+        lock.lock()
+        currentLayout = layout
+        lock.unlock()
     }
 
     func analyze(_ buffer: AVAudioPCMBuffer) {
@@ -388,8 +550,8 @@ private final class LiveSpectrumAnalyzer {
             }
         }
 
+        let nextBins = spectrumSnapshot(from: magnitudes)
         lock.lock()
-        let nextBins = spectrumBins(from: magnitudes)
         latestBins = nextBins
         lock.unlock()
     }
@@ -407,44 +569,74 @@ private final class LiveSpectrumAnalyzer {
 
     func reset() {
         lock.lock()
-        rollingPeak = 0.12
+        bandPeaks = Array(repeating: minimumBandFloor, count: bandResolution)
         smoothedBins = Array(repeating: 0, count: binCount)
         latestBins = Array(repeating: 0, count: binCount)
         lock.unlock()
     }
 
-    private func spectrumBins(from magnitudes: [Float]) -> [Float] {
-        guard binCount > 0 else { return [] }
-
+    // ------------------------------------------------------------
+    // Step 2 + 3: perceptual banding, then per-band peak normalization.
+    // ------------------------------------------------------------
+    private func bandEnergies(from magnitudes: [Float]) -> [Float] {
         let usableBins = max(2, magnitudes.count - 2)
-        var rawBins = Array(repeating: Float(0), count: binCount)
-        for index in 0..<binCount {
-            let lower = frequencyIndex(for: index, usableBins: usableBins)
-            let upper = max(lower + 1, frequencyIndex(for: index + 1, usableBins: usableBins))
+        var rawBands = Array(repeating: Float(0), count: bandResolution)
+
+        for index in 0..<bandResolution {
+            let lower = frequencyIndex(for: index, usableBins: usableBins, resolution: bandResolution)
+            let upper = max(lower + 1, frequencyIndex(for: index + 1, usableBins: usableBins, resolution: bandResolution))
             var total: Float = 0
             var samples = 0
             for magnitudeIndex in lower..<min(upper, magnitudes.count) {
                 total += magnitudes[magnitudeIndex]
                 samples += 1
             }
-            rawBins[index] = samples > 0 ? sqrt(total / Float(samples)) : 0
+            rawBands[index] = samples > 0 ? sqrt(total / Float(samples)) : 0
         }
 
-        let currentPeak = max(rawBins.max() ?? 0.0001, 0.0001)
-        rollingPeak = max(currentPeak, rollingPeak * 0.90)
+        var normalizedBands = Array(repeating: Float(0), count: bandResolution)
+        for index in 0..<bandResolution {
+            let magnitude = rawBands[index]
+
+            // Fast attack, slow release: jump straight to a new peak,
+            // otherwise let the peak float back down gradually.
+            if magnitude > bandPeaks[index] {
+                bandPeaks[index] = magnitude
+            } else {
+                bandPeaks[index] = max(magnitude, bandPeaks[index] * bandPeakDecay)
+            }
+            bandPeaks[index] = max(bandPeaks[index], minimumBandFloor)
+
+            let normalized = min(max(magnitude / bandPeaks[index], 0), 1)
+            normalizedBands[index] = pow(normalized, 0.52)
+        }
+
+        return normalizedBands
+    }
+
+    // Steps 2-5 combined for one analysis pass.
+    private func spectrumSnapshot(from magnitudes: [Float]) -> [Float] {
+        guard binCount > 0 else { return [] }
+
+        let normalizedBands = bandEnergies(from: magnitudes)
+
+        lock.lock()
+        let layout = currentLayout
+        lock.unlock()
+
+        let arranged = layout.arrange(bands: normalizedBands, totalCount: binCount)
 
         for index in 0..<binCount {
-            let normalized = min(max(rawBins[index] / rollingPeak, 0), 1)
-            let shaped = pow(normalized, 0.52)
-            let coefficient: Float = shaped > smoothedBins[index] ? 0.72 : 0.36
-            smoothedBins[index] += (shaped - smoothedBins[index]) * coefficient
+            let target = arranged[index]
+            let coefficient: Float = target > smoothedBins[index] ? 0.72 : 0.36
+            smoothedBins[index] += (target - smoothedBins[index]) * coefficient
         }
 
         return smoothedBins.map { min(max($0, 0), 1) }
     }
 
-    private func frequencyIndex(for visualBin: Int, usableBins: Int) -> Int {
-        let position = Float(visualBin) / Float(max(1, binCount))
+    private func frequencyIndex(for visualBin: Int, usableBins: Int, resolution: Int) -> Int {
+        let position = Float(visualBin) / Float(max(1, resolution))
         let curved = pow(position, 2.25)
         return min(max(1, Int(curved * Float(usableBins))), usableBins)
     }

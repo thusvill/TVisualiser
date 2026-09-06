@@ -37,7 +37,8 @@ struct ContentView: View {
     // State
     // ------------------------------------------------------------
 
-    @State private var presentedSheet: PresentedSheet?
+    @State private var showingSettings = false
+    @State private var showingMediaLibrary = false
 
     @Namespace private var focusNamespace
 
@@ -59,7 +60,8 @@ struct ContentView: View {
                 HeaderView(
                     showClock: showClock,
                     onMedia: { showingMediaLibrary = true },
-                    onSettings: { showingSettings = true }
+                    onSettings: { showingSettings = true },
+                    receiver: receiver
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .focusSection()
@@ -68,21 +70,22 @@ struct ContentView: View {
                 // Plain, non-focusable content — nothing here should
                 // ever hold focus or intercept the D-pad.
                 VStack(spacing: 18) {
-                    AlbumArtView(artwork: receiver.artwork, side: artworkSize)
-                    MetadataView(title: receiver.trackTitle, artist: receiver.artist, album: receiver.album)
+                    AlbumArtView(artwork: receiver.artwork, side: artworkSize, receiver: receiver)
+                    MetadataView(title: receiver.trackTitle, artist: receiver.artist, album: receiver.album, receiver: receiver)
                         .frame(maxWidth: 720)
                     AudioVisualizerView(
                         data: receiver.waveform,
-                        color: dynamicWaveformColor ? receiver.waveformColor : .black,
+                        color: (dynamicWaveformColor ? receiver.palette.mutedLight : receiver.palette.primaryText) ?? receiver.palette.primaryText,
                         sensitivity: waveformSensitivity,
                         lineWidth: waveformLineWidth
                     )
-                    .frame(width: width, height: 72)
+                    .frame(width: width, height: 100)
+
                 }
                 .frame(maxWidth: .infinity, maxHeight: min(height * 0.62, 440), alignment: .center)
                 .padding(.top, 24)
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 90)
 
                 MediaControlCard(
                     currentTime: receiver.currentTime,
@@ -91,13 +94,14 @@ struct ContentView: View {
                     onBackward: { receiver.skipBackward() },
                     onPlayPause: { receiver.togglePlayback() },
                     onForward: { receiver.skipForward() },
-                    focusNamespace: focusNamespace
+                    focusNamespace: focusNamespace,
+                    receiver: receiver
                 )
                 .frame(width: playerCardWidth)
                 .padding(.bottom, 28)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            
+
         }
         .background(background.ignoresSafeArea())
     }
@@ -105,7 +109,7 @@ struct ContentView: View {
     .onPlayPauseCommand {
         receiver.togglePlayback()
     }
-    
+
     .sheet(isPresented: $showingSettings) {
     SettingsView()
         .environmentObject(receiver)
@@ -133,10 +137,8 @@ private extension ContentView {
             // Base background
             // ------------------------------------------------------
 
-            Color(
-                white: 0.93
-            )
-            .ignoresSafeArea()
+            receiver.palette.background
+                .ignoresSafeArea()
 
             // ------------------------------------------------------
             // Full-screen blurred artwork
@@ -144,72 +146,27 @@ private extension ContentView {
 
             if let artwork = receiver.artwork {
 
-                Image(
-                    uiImage: artwork
-                )
-                .resizable()
-                .scaledToFill()
-                .scaleEffect(1.2)
-                .blur(
-                    radius: 20
-                )
-                .saturation(1.15)
-                .opacity(1)
-                .ignoresSafeArea()
-
-//                RadialGradient(
-//                    colors: [
-//                        receiver.waveformColor
-//                            .opacity(0.34),
-//
-//                        receiver.waveformColor
-//                            .opacity(0.18),
-//
-//                        Color.clear
-//                    ],
-//                    center: .center,
-//                    startRadius: 5,
-//                    endRadius: 50
-//                )
-//                .ignoresSafeArea()
+                Image(uiImage: artwork)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(1.2)
+                    .blur(radius: 20)
+                    .saturation(1.15)
+                    .opacity(1)
+                    .ignoresSafeArea()
             }
 
             // ------------------------------------------------------
-            // Soft warm wash to keep the blur visible
+            // Subtle darkening to preserve contrast, tinted with the
+            // palette's background so the wash reads as part of the
+            // same color scheme rather than a flat gray/black veil.
             // ------------------------------------------------------
 
-//            LinearGradient(
-//                colors: [
-//                    Color.white.opacity(0.00),
-//                    Color(white: 0.92).opacity(0.08),
-//                    Color(white: 0.95).opacity(0.08)
-//                ],
-//                startPoint: .top,
-//                endPoint: .bottom
-//            )
-//            .ignoresSafeArea()
-
-            // ------------------------------------------------------
-            // Subtle darkening to preserve contrast
-            // ------------------------------------------------------
-
-            Color.black.opacity(0.08)
+            receiver.palette.background.opacity(0.22)
                 .ignoresSafeArea()
 
-            // ------------------------------------------------------
-            // Center highlight
-            // ------------------------------------------------------
-
-//            RadialGradient(
-//                colors: [
-//                    Color.white.opacity(0.25),
-//                    Color.clear
-//                ],
-//                center: .center,
-//                startRadius: 120,
-//                endRadius: 700
-//            )
-//            .ignoresSafeArea()
+            receiver.palette.primaryText.opacity(0.06)
+                .ignoresSafeArea()
         }
     }
 
@@ -224,6 +181,7 @@ struct HeaderView: View {
     let showClock: Bool
     let onMedia: () -> Void
     let onSettings: () -> Void
+    let receiver: MediaPlayerStore
 
     var body: some View {
 
@@ -240,90 +198,51 @@ struct HeaderView: View {
                     Button(action: onMedia) {
                         Label("Media", systemImage: "music.note.list")
                             .font(.system(size: 17, weight: .medium, design: .rounded))
-                            .foregroundStyle(.black)
+                            .foregroundStyle(receiver.palette.primaryText)
                             .padding(.horizontal, 18)
                             .padding(.vertical, 11)
-                            .background(Color.white.opacity(0.82), in: Capsule())
+                            .background(pillBackground)
+                            .overlay {
+                                Capsule()
+                                    .stroke(receiver.palette.accent, lineWidth: 1)
+                            }
                     }
-                    .buttonStyle(TVButtonStyle())
+                    .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
 
-                    Button(
-                        action: onSettings
-                    ) {
+                    Button(action: onSettings) {
 
-                        HStack(
-                            spacing: 10
-                        ) {
+                        HStack(spacing: 10) {
 
-                            Image(
-                                systemName:
-                                    "gearshape.fill"
-                            )
-                            .font(
-                                .system(
-                                    size: 19,
-                                    weight: .semibold
-                                )
-                            )
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 19, weight: .semibold))
 
-                            Text(
-                                "Select to open settings"
-                            )
-                            .font(
-                                .system(
-                                    size: 17,
-                                    weight: .medium,
-                                    design: .rounded
-                                )
-                            )
+                            Text("Select to open settings")
+                                .font(.system(size: 17, weight: .medium, design: .rounded))
                         }
-                        .foregroundStyle(
-                            .black
-                        )
-                        .padding(
-                            .horizontal,
-                            18
-                        )
-                        .padding(
-                            .vertical,
-                            11
-                        )
-                        .background(
-                            Color.white.opacity(0.82),
-                            in: Capsule()
-                        )
+                        .foregroundStyle(receiver.palette.primaryText)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 11)
+                        .background(pillBackground)
                         .overlay {
-
                             Capsule()
-                                .stroke(
-                                    Color.white.opacity(0.90),
-                                    lineWidth: 1
-                                )
+                                .stroke(receiver.palette.accent, lineWidth: 1)
                         }
                         .shadow(
-                            color: .black.opacity(0.12),
+                            color: Color.black.opacity(0.25),
                             radius: 12,
                             x: 0,
                             y: 5
                         )
                     }
-                    .buttonStyle(
-                        TVButtonStyle()
-                    )
+                    .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
 
                     Spacer()
                 }
 
                 Spacer()
             }
-            .padding(
-                .top,
-                24
-            )
-            .padding(
-                .leading,
-                30
-            )
+            .padding(.top, 24)
+            .padding(.leading, 30)
 
             // ======================================================
             // Clock
@@ -337,36 +256,27 @@ struct HeaderView: View {
 
                         Spacer()
 
-                        TimelineView(
-                            .periodic(
-                                from: .now,
-                                by: 1
-                            )
-                        ) { context in
-
-                            ClockView(
-                                date: context.date
-                            )
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            ClockView(date: context.date, receiver: receiver)
                         }
                     }
 
                     Spacer()
                 }
-                .padding(
-                    .top,
-                    20
-                )
-                .padding(
-                    .trailing,
-                    32
-                )
+                .padding(.top, 20)
+                .padding(.trailing, 32)
             }
         }
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: .infinity,
-            alignment: .top
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// A pill background with real contrast against the blurred artwork
+    /// behind it, built from the palette rather than a flat opaque fill.
+    private var pillBackground: some View {
+        ZStack {
+            Capsule().fill(.ultraThinMaterial)
+            Capsule().fill(receiver.palette.background.opacity(0.55))
+        }
     }
 }
 
@@ -378,49 +288,23 @@ struct TVButtonStyle: ButtonStyle {
 
     @Environment(\.isFocused) private var isFocused
 
-    func makeBody(
-        configuration: Configuration
-    ) -> some View {
+    var accentColor: Color = .accentColor
+
+    func makeBody(configuration: Configuration) -> some View {
 
         configuration.label
-            .scaleEffect(
-                configuration.isPressed
-                    ? 0.94
-                    : 1.0
-            )
-            .opacity(
-                configuration.isPressed
-                    ? 0.75
-                    : 1.0
-            )
-            .scaleEffect(
-                isFocused
-                    ? 1.10
-                    : 1.0
-            )
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .opacity(configuration.isPressed ? 0.75 : 1.0)
+            .scaleEffect(isFocused ? 1.10 : 1.0)
             .overlay {
                 if isFocused {
-                    RoundedRectangle(
-                        cornerRadius: 16,
-                        style: .continuous
-                    )
-                    .stroke(
-                        Color.black.opacity(0.72),
-                        lineWidth: 3
-                    )
-                    .padding(-7)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(accentColor, lineWidth: 3)
+                        .padding(-7)
                 }
             }
-            .animation(
-                .easeOut(
-                    duration: 0.10
-                ),
-                value: configuration.isPressed
-            )
-            .animation(
-                .easeOut(duration: 0.12),
-                value: isFocused
-            )
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }
 
@@ -432,6 +316,7 @@ struct AlbumArtView: View {
 
     let artwork: UIImage?
     let side: CGFloat
+    let receiver: MediaPlayerStore
 
     var body: some View {
 
@@ -439,75 +324,38 @@ struct AlbumArtView: View {
 
             if let artwork {
 
-                Image(
-                    uiImage: artwork
-                )
-                .resizable()
-                .scaledToFill()
+                Image(uiImage: artwork)
+                    .resizable()
+                    .scaledToFill()
 
             } else {
 
                 ZStack {
 
-                    Color.white.opacity(0.74)
+                    receiver.palette.background.opacity(0.74)
 
-                    VStack(
-                        spacing: 12
-                    ) {
+                    VStack(spacing: 12) {
 
-                        Image(
-                            systemName:
-                                "music.note"
-                        )
-                        .font(
-                            .system(
-                                size: 48,
-                                weight: .medium
-                            )
-                        )
+                        Image(systemName: "music.note")
+                            .font(.system(size: 48, weight: .medium))
 
-                        Text(
-                            "Select a media source"
-                        )
-                        .font(
-                            .system(
-                                size: 20,
-                                weight: .medium,
-                                design: .rounded
-                            )
-                        )
+                        Text("Select a media source")
+                            .font(.system(size: 20, weight: .medium, design: .rounded))
                     }
-                    .foregroundStyle(
-                        .black.opacity(0.45)
-                    )
+                    .foregroundStyle(receiver.palette.secondaryText)
                 }
             }
         }
-        .frame(
-            width: side,
-            height: side
-        )
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: 12,
-                style: .continuous
-            )
-        )
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-
-            RoundedRectangle(
-                cornerRadius: 12,
-                style: .continuous
-            )
-            .stroke(
-                Color.white.opacity(0.85),
-                lineWidth: 1
-            )
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(receiver.palette.accent.opacity(0.5), lineWidth: 1)
         }
         .shadow(
-            color: .black.opacity(0.23),
+            color: Color.black.opacity(0.45),
             radius: 30,
-            x: 0,
+            x: 16,
             y: 16
         )
     }
@@ -522,63 +370,31 @@ struct MetadataView: View {
     let title: String
     let artist: String
     let album: String
+    let receiver: MediaPlayerStore
 
     var body: some View {
 
-        VStack(
-            spacing: 5
-        ) {
+        VStack(spacing: 5) {
 
-            Text(
-                title.isEmpty
-                        ? "Select a media source"
-                    : title
-            )
-            .font(
-                .system(
-                    size: 31,
-                    weight: .bold,
-                    design: .rounded
-                )
-            )
-            .foregroundStyle(
-                .black
-            )
-            .lineLimit(1)
-            .truncationMode(.tail)
+            Text(title.isEmpty ? "Select a media source" : title)
+                .font(.system(size: 31, weight: .bold, design: .rounded))
+                .foregroundStyle(receiver.palette.primaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
-            HStack(
-                spacing: 7
-            ) {
+            HStack(spacing: 7) {
 
-                Text(
-                    artist.isEmpty
-                        ? "TVisualiser"
-                        : artist
-                )
+                Text(artist.isEmpty ? "TVisualiser" : artist)
 
                 if !album.isEmpty {
-
                     Text("•")
-                        .foregroundStyle(
-                            .black.opacity(0.34)
-                        )
+                        .foregroundStyle(receiver.palette.secondaryText.opacity(0.6))
 
-                    Text(
-                        album
-                    )
+                    Text(album)
                 }
             }
-            .font(
-                .system(
-                    size: 17,
-                    weight: .medium,
-                    design: .rounded
-                )
-            )
-            .foregroundStyle(
-                .black.opacity(0.58)
-            )
+            .font(.system(size: 17, weight: .medium, design: .rounded))
+            .foregroundStyle(receiver.palette.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)
         }
@@ -597,26 +413,18 @@ struct AudioVisualizerView: View {
     let lineWidth: Double
 
     var body: some View {
-        GeometryReader { geometry in
-            WaveformBars(data: data, sensitivity: sensitivity)
-                .stroke(
-                    color.opacity(0.88),
-                    style: StrokeStyle(
-                        lineWidth: lineWidth,
-                        lineCap: .round,
-                        lineJoin: .round
-                    )
+        WaveformBars(data: data, sensitivity: sensitivity)
+            .stroke(
+                color.opacity(0.88),
+                style: StrokeStyle(
+                    lineWidth: lineWidth,
+                    lineCap: .round,
+                    lineJoin: .round
                 )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height
-                )
-        }
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: .infinity
-        )
-        .clipped()
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .drawingGroup()
     }
 }
 
@@ -626,13 +434,14 @@ private struct WaveformBars: Shape {
 
     func path(in rect: CGRect) -> Path {
         let values = data.isEmpty ? Array(repeating: Float(0.04), count: 2) : data
+        let sensitivityF = Float(sensitivity)
         let step = rect.width / CGFloat(max(1, values.count))
         let centerY = rect.midY
         let usableHeight = rect.height * 0.46
         var path = Path()
 
         for index in values.indices {
-            let normalized = max(0.02, min(1, values[index] * Float(sensitivity)))
+            let normalized = max(0.02, min(1, values[index] * sensitivityF))
             let shaped = CGFloat(pow(normalized, 0.72))
             let barHeight = max(CGFloat(2), shaped * usableHeight)
             let x = rect.minX + step * (CGFloat(index) + 0.5)
@@ -657,6 +466,7 @@ struct MediaControlCard: View {
     let onPlayPause: () -> Void
     let onForward: () -> Void
     let focusNamespace: Namespace.ID
+    let receiver: MediaPlayerStore
 
     private enum Control: Hashable {
         case backward
@@ -668,130 +478,54 @@ struct MediaControlCard: View {
 
     var body: some View {
 
-        VStack(
-            spacing: 14
-        ) {
+        VStack(spacing: 14) {
 
             // ======================================================
             // CONTROL BUTTONS
             // ======================================================
 
-            HStack(
-                alignment: .center,
-                spacing: 30
-            ) {
+            HStack(alignment: .center, spacing: 30) {
 
                 // --------------------------------------------------
                 // BACK 10
                 // --------------------------------------------------
 
-                Button(
-                    action: onBackward
-                ) {
-
-                    Image(
-                        systemName:
-                            "gobackward.10"
-                    )
-                    .font(
-                        .system(
-                            size: 24,
-                            weight: .semibold
-                        )
-                    )
-                    .foregroundStyle(
-                        .black
-                    )
-                    .frame(
-                        width: 55,
-                        height: 55
-                    )
+                Button(action: onBackward) {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(receiver.palette.primaryText)
+                        .frame(width: 55, height: 55)
                 }
-                .buttonStyle(
-                    TVButtonStyle()
-                )
-                .focused(
-                    $focusedControl,
-                    equals: .backward
-                )
+                .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+                .focused($focusedControl, equals: .backward)
 
                 // --------------------------------------------------
                 // PLAY / PAUSE
                 // --------------------------------------------------
 
-                Button(
-                    action: onPlayPause
-                ) {
-
-                    Image(
-                        systemName:
-                            isPlaying
-                                ? "pause.fill"
-                                : "play.fill"
-                    )
-                    .font(
-                        .system(
-                            size: 25,
-                            weight: .bold
-                        )
-                    )
-                    .foregroundStyle(
-                        .white
-                    )
-                    .frame(
-                        width: 66,
-                        height: 66
-                    )
-                    .background(
-                        Color.black,
-                        in: Circle()
-                    )
+                Button(action: onPlayPause) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 25, weight: .bold))
+                        .foregroundStyle(receiver.palette.onAccent)
+                        .frame(width: 66, height: 66)
+                        .background(receiver.palette.accent, in: Circle())
                 }
-                .buttonStyle(
-                    TVButtonStyle()
-                )
-                .focused(
-                    $focusedControl,
-                    equals: .playPause
-                )
-                .prefersDefaultFocus(
-                    true,
-                    in: focusNamespace
-                )
+                .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+                .focused($focusedControl, equals: .playPause)
+                .prefersDefaultFocus(true, in: focusNamespace)
 
                 // --------------------------------------------------
                 // FORWARD 10
                 // --------------------------------------------------
 
-                Button(
-                    action: onForward
-                ) {
-
-                    Image(
-                        systemName:
-                            "goforward.10"
-                    )
-                    .font(
-                        .system(
-                            size: 24,
-                            weight: .semibold
-                        )
-                    )
-                    .foregroundStyle(
-                        .black
-                    )
-                    .frame(
-                        width: 55,
-                        height: 55
-                    )
+                Button(action: onForward) {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(receiver.palette.primaryText)
+                        .frame(width: 55, height: 55)
                 }
-                .buttonStyle(
-                    TVButtonStyle()
-                )
-                .focused(
-                    $focusedControl,
-                    equals: .forward
-                )
+                .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+                .focused($focusedControl, equals: .forward)
             }
             .focusSection()
             .onMoveCommand { direction in
@@ -809,83 +543,30 @@ struct MediaControlCard: View {
             // PROGRESS BAR
             // ======================================================
 
-            HStack(
-                spacing: 12
-            ) {
+            HStack(spacing: 12) {
 
-                Text(
-                    formatTime(
-                        currentTime
-                    )
-                )
-                .font(
-                    .system(
-                        size: 13,
-                        weight: .semibold,
-                        design: .rounded
-                    )
-                )
-                .foregroundStyle(
-                    .black.opacity(0.65)
-                )
-                .frame(
-                    width: 42,
-                    alignment: .leading
-                )
+                Text(formatTime(currentTime))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(receiver.palette.secondaryText)
+                    .frame(width: 42, alignment: .leading)
 
-                MediaProgressBar(
-                    progress: progress
-                )
+                MediaProgressBar(progress: progress, receiver: receiver)
 
-                Text(
-                    formatTime(
-                        duration
-                    )
-                )
-                .font(
-                    .system(
-                        size: 13,
-                        weight: .semibold,
-                        design: .rounded
-                    )
-                )
-                .foregroundStyle(
-                    .black.opacity(0.65)
-                )
-                .frame(
-                    width: 42,
-                    alignment: .trailing
-                )
+                Text(formatTime(duration))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(receiver.palette.secondaryText)
+                    .frame(width: 42, alignment: .trailing)
             }
         }
-        .padding(
-            .horizontal,
-            30
-        )
-        .padding(
-            .vertical,
-            18
-        )
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(
-                cornerRadius: 26,
-                style: .continuous
-            )
-        )
+        .padding(.horizontal, 30)
+        .padding(.vertical, 18)
+        .background(cardBackground)
         .overlay {
-
-            RoundedRectangle(
-                cornerRadius: 26,
-                style: .continuous
-            )
-            .stroke(
-                Color.white.opacity(0.75),
-                lineWidth: 1
-            )
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(receiver.palette.accent.opacity(0.55), lineWidth: 1.5)
         }
         .shadow(
-            color: .black.opacity(0.15),
+            color: Color.black.opacity(0.35),
             radius: 28,
             x: 0,
             y: 14
@@ -895,46 +576,33 @@ struct MediaControlCard: View {
         }
     }
 
-    private var progress: CGFloat {
-
-        guard duration > 0 else {
-            return 0
-        }
-
-        return CGFloat(
-            min(
-                1,
-                max(
-                    0,
-                    currentTime / duration
-                )
-            )
-        )
+    /// Layers a material blur with a palette-derived tint underneath, so
+    /// the card reads as a distinct panel instead of blending into a
+    /// same-hued blurred background.
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 26, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(receiver.palette.background.opacity(0.6))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.18))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
-    private func formatTime(
-        _ seconds: TimeInterval
-    ) -> String {
+    private var progress: CGFloat {
+        guard duration > 0 else { return 0 }
+        return CGFloat(min(1, max(0, currentTime / duration)))
+    }
 
-        let total =
-            Int(
-                max(
-                    0,
-                    seconds.rounded()
-                )
-            )
-
-        let minutes =
-            total / 60
-
-        let seconds =
-            total % 60
-
-        return String(
-            format: "%d:%02d",
-            minutes,
-            seconds
-        )
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let total = Int(max(0, seconds.rounded()))
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private func moveFocusLeft() {
@@ -967,67 +635,37 @@ struct MediaControlCard: View {
 struct MediaProgressBar: View {
 
     let progress: CGFloat
+    let receiver: MediaPlayerStore
 
     var body: some View {
 
         GeometryReader { geometry in
 
-            let width =
-                geometry.size.width
+            let width = geometry.size.width
+            let progressWidth = width * progress
 
-            let progressWidth =
-                width * progress
-
-            ZStack(
-                alignment: .leading
-            ) {
+            ZStack(alignment: .leading) {
 
                 Capsule()
-                    .fill(
-                        Color.black.opacity(0.16)
-                    )
-                    .frame(
-                        height: 4
-                    )
+                    .fill(receiver.palette.primaryText.opacity(0.22))
+                    .frame(height: 4)
 
                 Capsule()
-                    .fill(
-                        Color.black
-                    )
-                    .frame(
-                        width: max(
-                            0,
-                            progressWidth
-                        ),
-                        height: 4
-                    )
+                    .fill(receiver.palette.accent)
+                    .frame(width: max(0, progressWidth), height: 4)
 
                 Circle()
-                    .fill(
-                        Color.black
-                    )
-                    .frame(
-                        width: 12,
-                        height: 12
-                    )
-                    .offset(
-                        x: max(
-                            0,
-                            min(
-                                progressWidth - 6,
-                                width - 12
-                            )
-                        )
-                    )
+                    .fill(receiver.palette.accent)
+                    .frame(width: 12, height: 12)
+                    .overlay {
+                        Circle()
+                            .stroke(receiver.palette.onAccent.opacity(0.6), lineWidth: 1)
+                    }
+                    .offset(x: max(0, min(progressWidth - 6, width - 12)))
             }
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity
-            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(
-            height: 20
-        )
+        .frame(height: 20)
     }
 }
 
@@ -1038,51 +676,20 @@ struct MediaProgressBar: View {
 struct ClockView: View {
 
     let date: Date
+    let receiver: MediaPlayerStore
 
     var body: some View {
 
-        VStack(
-            alignment: .trailing,
-            spacing: 0
-        ) {
+        VStack(alignment: .trailing, spacing: 0) {
 
-            Text(
-                date,
-                format:
-                    .dateTime
-                    .hour()
-                    .minute()
-            )
-            .font(
-                .system(
-                    size: 40,
-                    weight: .bold,
-                    design: .rounded
-                )
-            )
-            .monospacedDigit()
-            .foregroundStyle(
-                .black
-            )
+            Text(date, format: .dateTime.hour().minute())
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(receiver.palette.primaryText)
 
-            Text(
-                date,
-                format:
-                    .dateTime
-                    .weekday(
-                        .abbreviated
-                    )
-            )
-            .font(
-                .system(
-                    size: 21,
-                    weight: .bold,
-                    design: .rounded
-                )
-            )
-            .foregroundStyle(
-                .black.opacity(0.85)
-            )
+            Text(date, format: .dateTime.weekday(.abbreviated))
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .foregroundStyle(receiver.palette.secondaryText)
         }
     }
 }
@@ -1122,13 +729,17 @@ struct MediaLibraryView: View {
 
                     ForEach(tracks) { track in
                         Button {
-                            let source = FTPMediaSource(account: ftp)
-                            player.load(track: track, from: source)
-                            presentationMode.wrappedValue.dismiss()
+                            if let source = try? FTPMediaSource(account: ftp) {
+                                player.load(track: track, from: source)
+                                presentationMode.wrappedValue.dismiss()
+                            } else {
+                                errorMessage = "Failed to connect to the FTP server. Check your settings."
+                            }
                         } label: {
                             Label(track.title, systemImage: "play.circle")
+                                .foregroundStyle(player.palette.primaryText)
                         }
-                        .buttonStyle(TVButtonStyle())
+                        .buttonStyle(TVButtonStyle(accentColor: player.palette.accent))
                     }
                 }
             }
@@ -1140,6 +751,7 @@ struct MediaLibraryView: View {
             }
         }
         .navigationTitle("Media Library")
+        .tint(player.palette.accent)
         .task {
             if ftp.isConfigured {
                 refresh()
@@ -1175,9 +787,7 @@ struct SettingsView: View {
     @EnvironmentObject private var ftp: FTPAccountStore
     @EnvironmentObject private var player: MediaPlayerStore
 
-    @Environment(
-        \.presentationMode
-    )
+    @Environment(\.presentationMode)
     var presentationMode
 
     @AppStorage("showClock")
@@ -1200,12 +810,14 @@ struct SettingsView: View {
             Section {
                 Text("TVisualiser")
                     .font(.title2.bold())
+                    .foregroundStyle(player.palette.primaryText)
                 Text("Choose a source to begin playback.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(player.palette.secondaryText)
             }
 
             Section("Display") {
                 Toggle("Show clock", isOn: $showClock)
+                    .tint(player.palette.accent)
             }
 
             Section("FTP") {
@@ -1215,18 +827,21 @@ struct SettingsView: View {
                 SecureField("Password", text: $ftp.password)
                 TextField("Media folder", text: $ftp.path)
                 Button("Save FTP Settings") { ftp.save() }
+                    .tint(player.palette.accent)
                 Text("Use the server IP only, without ftp://. The default port for the included server is 2121.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(player.palette.secondaryText)
             }
 
             Section("Waveform") {
                 Toggle("Dynamic color from cover art", isOn: $dynamicWaveformColor)
-                ValueStepper(label: "Line width", value: $waveformLineWidth, range: 1...6, step: 0.5)
-                ValueStepper(label: "Sensitivity", value: $waveformSensitivity, range: 0.5...2.0, step: 0.1)
+                    .tint(player.palette.accent)
+                ValueStepper(label: "Line width", value: $waveformLineWidth, range: 1...6, step: 0.5, receiver: player)
+                ValueStepper(label: "Sensitivity", value: $waveformSensitivity, range: 0.5...2.0, step: 0.1, receiver: player)
             }
         }
         .navigationTitle("Settings")
+        .tint(player.palette.accent)
         .onDisappear {
             ftp.save()
         }
@@ -1251,47 +866,45 @@ struct ValueStepper: View {
 
     let step: Double
 
+    let receiver: MediaPlayerStore
+
     var body: some View {
 
         HStack(spacing: 18) {
             Text(label)
+                .foregroundStyle(receiver.palette.primaryText)
             Spacer()
 
             Button(action: decrease) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(receiver.palette.primaryText)
             }
-            .buttonStyle(TVButtonStyle())
+            .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
             .disabled(value <= range.lowerBound)
 
             Text(String(format: "%.1f", value))
                 .font(.system(.body, design: .rounded).monospacedDigit())
+                .foregroundStyle(receiver.palette.primaryText)
                 .frame(width: 54)
 
             Button(action: increase) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(receiver.palette.primaryText)
             }
-            .buttonStyle(TVButtonStyle())
+            .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
             .disabled(value >= range.upperBound)
         }
         .padding(.vertical, 8)
     }
 
     private func decrease() {
-        value =
-            max(
-                range.lowerBound,
-                value - step
-            )
+        value = max(range.lowerBound, value - step)
     }
 
     private func increase() {
-        value =
-            min(
-                range.upperBound,
-                value + step
-            )
+        value = min(range.upperBound, value + step)
     }
 }
 
