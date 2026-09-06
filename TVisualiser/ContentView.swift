@@ -180,7 +180,7 @@ struct ContentView: View {
                         lineWidth: waveformLineWidth,
                         style: waveformStyle
                     )
-                    .frame(width: width, height: 100)
+                    .frame(width: width, height: 300)
 
                 }
                 .frame(maxWidth: .infinity, maxHeight: min(height * 0.62, 440), alignment: .center)
