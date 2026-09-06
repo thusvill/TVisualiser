@@ -9,6 +9,26 @@ import SwiftUI
 import UIKit
 
 // ================================================================
+// MARK: - Shared Focus Model
+// ================================================================
+//
+// A single enum for every focusable control on the main screen.
+// Both HeaderView and MediaControlCard receive a
+// FocusState<TVFocusArea?>.Binding pointing at the same underlying
+// @FocusState in ContentView, so either view can push focus into
+// the other with plain assignment (`focusedArea.wrappedValue = .x`)
+// instead of relying purely on geometry-based focus engine guesses.
+// ================================================================
+
+enum TVFocusArea: Hashable {
+    case media
+    case settings
+    case backward
+    case playPause
+    case forward
+}
+
+// ================================================================
 // MARK: - ContentView
 // ================================================================
 
@@ -42,16 +62,30 @@ struct ContentView: View {
 
     @Namespace private var focusNamespace
 
+    // Shared focus across HeaderView + MediaControlCard.
+    @FocusState private var focusedArea: TVFocusArea?
+
     // ============================================================
     // MARK: Body
     // ============================================================
 
     var body: some View {
 
+
+
     GeometryReader { geometry in
         let width = geometry.size.width
         let height = geometry.size.height
-        let artworkSize = min(width * 0.27, height * 0.34, 330)
+
+
+
+        let artworkScale: CGFloat = 0.90
+        let maxArtworkSize: CGFloat = 330
+
+
+        let minDimension = min(geometry.size.width, geometry.size.height)
+        let artworkSize = min(minDimension * artworkScale, maxArtworkSize)
+
         let playerCardWidth = min(width * 0.48, 760)
 
         ZStack {
@@ -61,10 +95,12 @@ struct ContentView: View {
                     showClock: showClock,
                     onMedia: { showingMediaLibrary = true },
                     onSettings: { showingSettings = true },
-                    receiver: receiver
+                    receiver: receiver,
+                    focusedArea: $focusedArea
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .focusSection()
+
                 Spacer(minLength: 0)
 
                 // Plain, non-focusable content — nothing here should
@@ -95,8 +131,10 @@ struct ContentView: View {
                     onPlayPause: { receiver.togglePlayback() },
                     onForward: { receiver.skipForward() },
                     focusNamespace: focusNamespace,
-                    receiver: receiver
+                    receiver: receiver,
+                    focusedArea: $focusedArea
                 )
+                .focusSection()
                 .frame(width: playerCardWidth)
                 .padding(.bottom, 28)
             }
@@ -121,6 +159,8 @@ struct ContentView: View {
         .environmentObject(ftp)
 }
 }
+
+
 }
 
 // ================================================================
@@ -183,6 +223,12 @@ struct HeaderView: View {
     let onSettings: () -> Void
     let receiver: MediaPlayerStore
 
+    // Shared focus binding — lets this view both react to focus
+    // (via .focused) and explicitly push focus into MediaControlCard
+    // (via onMoveCommand) without going through the geometry-based
+    // focus engine.
+    var focusedArea: FocusState<TVFocusArea?>.Binding
+
     var body: some View {
 
         ZStack {
@@ -208,6 +254,7 @@ struct HeaderView: View {
                             }
                     }
                     .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+                    .focused(focusedArea, equals: .media)
 
                     Button(action: onSettings) {
 
@@ -235,6 +282,7 @@ struct HeaderView: View {
                         )
                     }
                     .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
+                    .focused(focusedArea, equals: .settings)
 
                     Spacer()
                 }
@@ -268,6 +316,18 @@ struct HeaderView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left:
+                moveFocusLeft()
+            case .right:
+                moveFocusRight()
+            case .down:
+                moveFocusDown()
+            default:
+                break
+            }
+        }
     }
 
     /// A pill background with real contrast against the blurred artwork
@@ -276,6 +336,42 @@ struct HeaderView: View {
         ZStack {
             Capsule().fill(.ultraThinMaterial)
             Capsule().fill(receiver.palette.background.opacity(0.55))
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Focus routing — mirrors the left/right pattern used inside
+    // MediaControlCard, extended with a "down" hop into the
+    // control card so vertical navigation doesn't depend solely on
+    // the automatic focus engine guessing across the gap in between.
+    // ------------------------------------------------------------
+
+    private func moveFocusLeft() {
+        switch focusedArea.wrappedValue {
+        case .settings:
+            focusedArea.wrappedValue = .media
+        default:
+            break
+        }
+    }
+
+    private func moveFocusRight() {
+        switch focusedArea.wrappedValue {
+        case .media:
+            focusedArea.wrappedValue = .settings
+        default:
+            break
+        }
+    }
+
+    private func moveFocusDown() {
+        switch focusedArea.wrappedValue {
+        case .media:
+            focusedArea.wrappedValue = .backward
+        case .settings:
+            focusedArea.wrappedValue = .forward
+        default:
+            focusedArea.wrappedValue = .playPause
         }
     }
 }
@@ -287,6 +383,7 @@ struct HeaderView: View {
 struct TVButtonStyle: ButtonStyle {
 
     @Environment(\.isFocused) private var isFocused
+
 
     var accentColor: Color = .accentColor
 
@@ -348,10 +445,10 @@ struct AlbumArtView: View {
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(receiver.palette.accent.opacity(0.5), lineWidth: 1)
-        }
+//        .overlay {
+//            RoundedRectangle(cornerRadius: 12, style: .continuous)
+//                .stroke(receiver.palette.accent.opacity(0.5), lineWidth: 1)
+//        }
         .shadow(
             color: Color.black.opacity(0.45),
             radius: 30,
@@ -468,13 +565,9 @@ struct MediaControlCard: View {
     let focusNamespace: Namespace.ID
     let receiver: MediaPlayerStore
 
-    private enum Control: Hashable {
-        case backward
-        case playPause
-        case forward
-    }
-
-    @FocusState private var focusedControl: Control?
+    // Shared focus binding — same underlying @FocusState as
+    // HeaderView, so focus can hop cleanly between the two sections.
+    var focusedArea: FocusState<TVFocusArea?>.Binding
 
     var body: some View {
 
@@ -497,7 +590,7 @@ struct MediaControlCard: View {
                         .frame(width: 55, height: 55)
                 }
                 .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
-                .focused($focusedControl, equals: .backward)
+                .focused(focusedArea, equals: .backward)
 
                 // --------------------------------------------------
                 // PLAY / PAUSE
@@ -511,7 +604,7 @@ struct MediaControlCard: View {
                         .background(receiver.palette.accent, in: Circle())
                 }
                 .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
-                .focused($focusedControl, equals: .playPause)
+                .focused(focusedArea, equals: .playPause)
                 .prefersDefaultFocus(true, in: focusNamespace)
 
                 // --------------------------------------------------
@@ -525,7 +618,7 @@ struct MediaControlCard: View {
                         .frame(width: 55, height: 55)
                 }
                 .buttonStyle(TVButtonStyle(accentColor: receiver.palette.accent))
-                .focused($focusedControl, equals: .forward)
+                .focused(focusedArea, equals: .forward)
             }
             .focusSection()
             .onMoveCommand { direction in
@@ -534,6 +627,8 @@ struct MediaControlCard: View {
                     moveFocusLeft()
                 case .right:
                     moveFocusRight()
+                case .up:
+                    moveFocusUp()
                 default:
                     break
                 }
@@ -572,7 +667,9 @@ struct MediaControlCard: View {
             y: 14
         )
         .onAppear {
-            focusedControl = .playPause
+            if focusedArea.wrappedValue == nil {
+                focusedArea.wrappedValue = .playPause
+            }
         }
     }
 
@@ -606,24 +703,42 @@ struct MediaControlCard: View {
     }
 
     private func moveFocusLeft() {
-        switch focusedControl {
+        switch focusedArea.wrappedValue {
         case .forward:
-            focusedControl = .playPause
+            focusedArea.wrappedValue = .playPause
         case .playPause, nil:
-            focusedControl = .backward
+            focusedArea.wrappedValue = .backward
         case .backward:
             onBackward()
+        default:
+            break
         }
     }
 
     private func moveFocusRight() {
-        switch focusedControl {
+        switch focusedArea.wrappedValue {
         case .backward:
-            focusedControl = .playPause
+            focusedArea.wrappedValue = .playPause
         case .playPause, nil:
-            focusedControl = .forward
+            focusedArea.wrappedValue = .forward
         case .forward:
             onForward()
+        default:
+            break
+        }
+    }
+
+    /// Hops focus back up into HeaderView, roughly preserving the
+    /// horizontal position: the leftmost control returns to the
+    /// media pill, the rest return to settings.
+    private func moveFocusUp() {
+        switch focusedArea.wrappedValue {
+        case .backward:
+            focusedArea.wrappedValue = .media
+        case .playPause, .forward:
+            focusedArea.wrappedValue = .settings
+        default:
+            break
         }
     }
 }
@@ -758,10 +873,25 @@ struct MediaLibraryView: View {
             }
         }
     }
+    .background(cardBackground)
     .onExitCommand {
         presentationMode.wrappedValue.dismiss()
     }
 }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 26, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(player.palette.foreground.opacity(0.6))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.38))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
 
     private func refresh() {
         isLoading = true
@@ -846,10 +976,28 @@ struct SettingsView: View {
             ftp.save()
         }
     }
+    .background(cardBackground)
     .onExitCommand {
         presentationMode.wrappedValue.dismiss()
     }
 }
+
+
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 26, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(player.palette.foreground.opacity(0.6))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.38))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
 }
 
 // ================================================================

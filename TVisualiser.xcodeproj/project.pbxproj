@@ -16,22 +16,9 @@
 		0496B8DD304A63C0005F81CA /* TVisualiser.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TVisualiser.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		0498D6E9304D9D7900FF9DCA /* Exceptions for "TVisualiser" folder in "TVisualiser" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Untitled.swift,
-			);
-			target = 0496B8DC304A63C0005F81CA /* TVisualiser */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0496B8DF304A63C0005F81CA /* TVisualiser */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				0498D6E9304D9D7900FF9DCA /* Exceptions for "TVisualiser" folder in "TVisualiser" target */,
-			);
 			path = TVisualiser;
 			sourceTree = "<group>";
 		};
