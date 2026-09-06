@@ -92,7 +92,7 @@ enum SpectrumLayout {
 final class MediaPlayerStore: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var trackTitle = "Select a media source"
-    @Published private(set) var artist = "TVisualiser"
+    @Published private(set) var artist = ""
     @Published private(set) var album = ""
     @Published private(set) var artwork: UIImage?
     @Published private(set) var waveformColor: Color = .black
@@ -152,7 +152,7 @@ final class MediaPlayerStore: ObservableObject {
     func select(source: any MediaSource) {
         activeSourceID = source.id
         trackTitle = "No media selected"
-        artist = source.displayName
+        artist = ""
         album = ""
         artwork = nil
         waveformColor = .black
@@ -164,9 +164,24 @@ final class MediaPlayerStore: ObservableObject {
             do {
                 let preparedTrack = try await source.prepare(track)
                 try playback.load(url: preparedTrack.mediaURL)
-                trackTitle = preparedTrack.title
-                artist = preparedTrack.artist
-                album = preparedTrack.album
+
+                // Prefer whatever the source already parsed, but fall back
+                // to metadata read straight from the file itself whenever
+                // the source came back empty — mirrors how artwork already
+                // falls back to `playback.artworkData()` below. This is
+                // what fixes artist (and album/title) showing blank: the
+                // source's own tag parsing may miss fields that are still
+                // present in the file's embedded metadata.
+                trackTitle = preparedTrack.title.isEmpty
+                    ? (playback.titleFromMetadata() ?? preparedTrack.title)
+                    : preparedTrack.title
+                artist = preparedTrack.artist.isEmpty
+                    ? (playback.artistFromMetadata() ?? preparedTrack.artist)
+                    : preparedTrack.artist
+                album = preparedTrack.album.isEmpty
+                    ? (playback.albumFromMetadata() ?? preparedTrack.album)
+                    : preparedTrack.album
+
                 duration = playback.duration
 //                waveform = Self.silentWaveform()
                 updateWaveform(Self.silentWaveform())
@@ -295,6 +310,55 @@ private final class AudioPlaybackEngine {
         return asset.commonMetadata
             .first(where: { $0.commonKey == .commonKeyArtwork })?
             .dataValue
+    }
+
+    /// Track title read straight from the file's embedded metadata.
+    /// Used as a fallback when the source's own parsing didn't supply one.
+    func titleFromMetadata() -> String? {
+        stringMetadata(commonKey: .commonKeyTitle)
+    }
+
+    /// Artist read straight from the file's embedded metadata (ID3 TPE1,
+    /// iTunes ©ART, QuickTime artist atom, etc.). Used as a fallback when
+    /// the source's own parsing didn't supply one — this is what makes
+    /// artist show up even when a given MediaSource never populates it.
+    func artistFromMetadata() -> String? {
+        stringMetadata(commonKey: .commonKeyArtist)
+    }
+
+    /// Album name read straight from the file's embedded metadata.
+    /// Used as a fallback when the source's own parsing didn't supply one.
+    func albumFromMetadata() -> String? {
+        stringMetadata(commonKey: .commonKeyAlbumName)
+    }
+
+    /// Looks up a common metadata key across every metadata format the
+    /// asset exposes (not just `commonMetadata`). `commonMetadata` is
+    /// supposed to be the union of every format's common-keyed items, but
+    /// in practice some ID3/iTunes tags don't get mapped into it — going
+    /// straight to `asset.metadata(forFormat:)` per format and matching on
+    /// `commonKey` there catches those cases too.
+    private func stringMetadata(commonKey: AVMetadataKey) -> String? {
+        guard let url = audioFile?.url else { return nil }
+        let asset = AVAsset(url: url)
+
+        if let value = asset.commonMetadata
+            .first(where: { $0.commonKey == commonKey })?
+            .stringValue,
+           !value.isEmpty {
+            return value
+        }
+
+        for format in asset.availableMetadataFormats {
+            if let value = asset.metadata(forFormat: format)
+                .first(where: { $0.commonKey == commonKey })?
+                .stringValue,
+               !value.isEmpty {
+                return value
+            }
+        }
+
+        return nil
     }
 
     func spectrum() -> [Float] {

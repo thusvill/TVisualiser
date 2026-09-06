@@ -392,14 +392,14 @@ struct TVButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .opacity(configuration.isPressed ? 0.75 : 1.0)
-            .scaleEffect(isFocused ? 1.10 : 1.0)
-            .overlay {
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(accentColor, lineWidth: 3)
-                        .padding(-7)
-                }
-            }
+            .scaleEffect(isFocused ? 1.25 : 1.0)
+//            .overlay {
+//                if isFocused {
+//                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+//                        .stroke(accentColor, lineWidth: 3)
+//                        .padding(-7)
+//                }
+//            }
             .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.12), value: isFocused)
     }
@@ -481,7 +481,7 @@ struct MetadataView: View {
 
             HStack(spacing: 7) {
 
-                Text(artist.isEmpty ? "TVisualiser" : artist)
+                Text(artist.isEmpty ? "" : artist)
 
                 if !album.isEmpty {
                     Text("•")

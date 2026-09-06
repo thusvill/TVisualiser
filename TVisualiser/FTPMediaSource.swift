@@ -84,7 +84,7 @@ final class FTPMediaSource: MediaSource {
                     return MediaTrack(
                         id: trackPath,
                         title: URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent,
-                        artist: "FTP",
+                        artist: "",
                         album: "",
                         artworkData: nil,
                         mediaURL: URL(string: "ftp://\(self.account.host)/\(trackPath)")!,
