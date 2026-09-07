@@ -81,13 +81,36 @@ final class FTPMediaSource: MediaSource {
                     let name = file.name
                     guard !file.isDirectory, Self.isPlayable(name: name) else { return nil }
                     let trackPath = self.path(for: name, relativeTo: pathToFetch)
+
+                    // NOTE: filenames from a real FTP server can contain spaces,
+                    // '#', '%', '&', accented/non-ASCII characters, etc. — none
+                    // of which are valid unescaped in a URL string. Building the
+                    // URL via string interpolation + URL(string:) will silently
+                    // return nil for those files, which used to crash here via
+                    // a force-unwrap. Building it through URLComponents with
+                    // percentEncodedPath handles the escaping safely instead.
+                    guard let escapedPath = trackPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+                        print("FTP: Skipping '\(trackPath)' — could not percent-encode path.")
+                        return nil
+                    }
+
+                    var urlComponents = URLComponents()
+                    urlComponents.scheme = "ftp"
+                    urlComponents.host = self.account.host
+                    urlComponents.percentEncodedPath = escapedPath.hasPrefix("/") ? escapedPath : "/\(escapedPath)"
+
+                    guard let mediaURL = urlComponents.url else {
+                        print("FTP: Skipping '\(trackPath)' — could not build a valid URL.")
+                        return nil
+                    }
+
                     return MediaTrack(
                         id: trackPath,
                         title: URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent,
                         artist: "",
                         album: "",
                         artworkData: nil,
-                        mediaURL: URL(string: "ftp://\(self.account.host)/\(trackPath)")!,
+                        mediaURL: mediaURL,
                         duration: nil
                     )
                 }

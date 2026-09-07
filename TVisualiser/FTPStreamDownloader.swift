@@ -27,7 +27,7 @@ actor FTPStreamDownloader {
         let (inputStream, outputStream) = try openControlConnection()
         defer { inputStream.close(); outputStream.close() }
 
-        try readResponse(inputStream) // 220 welcome
+//        try readResponse(inputStream) // 220 welcome
         try sendCommand(outputStream, "USER \(username)")
         _ = try readResponse(inputStream) // 331
         try sendCommand(outputStream, "PASS \(password)")
